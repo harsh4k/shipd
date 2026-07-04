@@ -42,8 +42,8 @@ for Sysinternals RAMMap for two things: the memory breakdown, and
 
 - `mem` command: print breakdown.
 - `free` command: breakdown → self-elevate if needed → purge → print
-  "freed X GB" + breakdown after. Elevated child writes freed bytes to a temp
-  file so the calling dashboard can display it.
+  "freed X GB" + breakdown after. The caller measures standby before/after via
+  `Get-MemoryBreakdown` itself, so no data handoff from the elevated child.
 
 ### dashboard.ps1
 
