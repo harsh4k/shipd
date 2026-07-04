@@ -92,7 +92,7 @@ function Get-TodaySnapSummary {
 }
 
 function Build-DashFrame {
-    param($Config, [string[]]$GitLines, $Snap, $Stats, [double[]]$CpuHist, [int]$W, [int]$H)
+    param($Config, [string[]]$GitLines, $Snap, $Stats, [double[]]$CpuHist, [int]$W, [int]$H, $Mem, [string]$MemMsg = '')
     $ph = $H - 2
     $lw = 34; $rw = 32; $mw = $W - $lw - $rw
 
@@ -114,6 +114,13 @@ function Build-DashFrame {
     $left += "UP  $($TH.B)$($up.Days)d $($up.Hours)h $($up.Minutes)m"
     $left += ''
     foreach ($disk in $Stats.disks) { $left += "$($TH.D)$disk" }
+    if ($Mem) {
+        $left += ''
+        $left += "$($TH.D)MEMORY$(if ($MemMsg) { "  $($TH.B)$MemMsg" })"
+        foreach ($row in @(@('use', $Mem.in_use), @('stby', $Mem.standby), @('mod', $Mem.modified), @('free', $Mem.free))) {
+            $left += ('{0,-5}' -f $row[0]) + (Get-Bar ($row[1] / $Mem.total * 100) 12) + " $($TH.B)$($row[1])"
+        }
+    }
 
     # ── middle: processes ──
     $miw = $mw - 2
@@ -151,7 +158,7 @@ function Build-DashFrame {
     $leftP = New-Panel 'SHIPD' $left $lw $ph
     $midP = New-Panel 'PROCESSES' $mid $mw $ph
     $frame = for ($i = 0; $i -lt $ph; $i++) { $leftP[$i] + $midP[$i] + $right[$i] }
-    $frame + "$($TH.D)  q quit · g rescan git$($TH.R)"
+    $frame + "$($TH.D)  q quit · g rescan git · f free ram$($TH.R)"
 }
 
 function Show-LiveDashboard {
@@ -165,6 +172,7 @@ function Show-LiveDashboard {
     $summary = Get-TodaySnapSummary $Config $LogPath
     $cpuHist = @()
     $tick = 0
+    $memMsg = ''; $memMsgTicks = 0
     [Console]::CursorVisible = $false
     Clear-Host
     try {
@@ -175,10 +183,12 @@ function Show-LiveDashboard {
                 if ($W -lt 110 -or $H -lt 24) { return }
             }
             $stats = Get-SystemStats
+            $mem = Get-MemoryBreakdown
+            if ($memMsgTicks -gt 0) { $memMsgTicks-- } else { $memMsg = '' }
             $cpuHist = @($cpuHist + [double]$stats.cpu | Select-Object -Last 60)
             if ($tick -gt 0 -and $tick % 15 -eq 0) { $summary = Get-TodaySnapSummary $Config $LogPath }
             $snap = [pscustomobject]@{ Focused = Get-FocusedProcessName; IdleSec = Get-IdleSeconds; Summary = $summary }
-            $frame = Build-DashFrame -Config $Config -GitLines $gitLines -Snap $snap -Stats $stats -CpuHist $cpuHist -W $W -H $H
+            $frame = Build-DashFrame -Config $Config -GitLines $gitLines -Snap $snap -Stats $stats -CpuHist $cpuHist -W $W -H $H -Mem $mem -MemMsg $memMsg
             [Console]::SetCursorPosition(0, 0)
             Write-Host ($frame -join "`n") -NoNewline
             $tick++
@@ -188,6 +198,15 @@ function Show-LiveDashboard {
                     $k = [Console]::ReadKey($true)
                     if ($k.KeyChar -in 'q', 'Q') { return }
                     if ($k.KeyChar -in 'g', 'G') { $gitLines = Get-GitPanelLines $Config }
+                    if ($k.KeyChar -in 'f', 'F' -and $mem) {
+                        try {
+                            Start-Process pwsh -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', "$PSScriptRoot\shipd.ps1", 'free'
+                            $freed = [math]::Round([math]::Max(0, $mem.standby - (Get-MemoryBreakdown).standby), 2)
+                            $memMsg = "✓ freed $freed GB"
+                        }
+                        catch { $memMsg = 'free ram cancelled' }   # UAC declined — not an error
+                        $memMsgTicks = 5
+                    }
                 }
             }
         }

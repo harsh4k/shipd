@@ -36,7 +36,8 @@ $stats = [pscustomobject]@{ cpu = 42; gpu = '10% 60C'; ram_used = 8.5; ram_total
 $snap = [pscustomobject]@{ Focused = 'Code'; IdleSec = 1.5; Summary = $null }
 foreach ($dim in @(@(120, 30), @(110, 24), @(160, 45))) {
     $W = $dim[0]; $H = $dim[1]
-    $frame = @(Build-DashFrame -Config $cfg -GitLines @('plain', "$($TH.B)colored line") -Snap $snap -Stats $stats -CpuHist @(0, 30, 100) -W $W -H $H)
+    $mem = [pscustomobject]@{ total = 16; in_use = 9.25; standby = 4.5; modified = 0.25; free = 2 }
+    $frame = @(Build-DashFrame -Config $cfg -GitLines @('plain', "$($TH.B)colored line") -Snap $snap -Stats $stats -CpuHist @(0, 30, 100) -W $W -H $H -Mem $mem -MemMsg 'freed 2.5 GB')
     if ($frame.Count -ne $H - 1) { throw "frame ${W}x${H}: expected $($H - 1) lines, got $($frame.Count)" }
     $bad = $frame[0..($H - 3)] | Where-Object { (Get-VisLen $_) -ne $W }
     if ($bad) { throw "frame ${W}x${H}: ragged lines (visible width != $W):`n$($bad -join "`n")" }
