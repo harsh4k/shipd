@@ -4,10 +4,7 @@ A daily dev + activity report for Windows, written in pure PowerShell. No depend
 
 Every 10 minutes it takes a silent snapshot of what you're doing (focused app, idle time, running games). Every evening it builds a report combining that with your git commits across all your projects, plus system stats.
 
-```
-<img width="1912" height="950" alt="image" src="https://github.com/user-attachments/assets/0484611d-e286-4bd2-a4ac-4a79e6a867d0" />
-
-```
+![shipd live dashboard](docs/dashboard.png)
 
 ## Requirements
 
