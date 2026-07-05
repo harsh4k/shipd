@@ -60,17 +60,12 @@ function New-Panel {
 function Get-GitPanelLines {
     param($Config)
     $lines = @()
-    foreach ($root in $Config.git_roots) {
-        foreach ($repo in Find-Repos -Root $root) {
-            $commits = @(Get-DayCommits -Repo $repo)
-            if (-not $commits.Count) { continue }
-            $net = ($commits | Measure-Object NetLines -Sum).Sum
-            $sign = if ($net -ge 0) { '+' } else { '' }
-            $lines += "$($TH.B)$(Split-Path $repo -Leaf)$($TH.D)  $($commits.Count)c $sign$net"
-            foreach ($c in $commits | Select-Object -First 5) {
-                $msg = $c.Message; if ($msg.Length -gt 20) { $msg = $msg.Substring(0, 19) + '…' }
-                $lines += "$($TH.D) $($c.Hash)$($TH.G) $msg"
-            }
+    foreach ($repo in Get-DayRepoCommits -Config $Config) {
+        $sign = if ($repo.NetLines -ge 0) { '+' } else { '' }
+        $lines += "$($TH.B)$($repo.Name)$($TH.D)  $($repo.Commits.Count)c $sign$($repo.NetLines)"
+        foreach ($c in $repo.Commits | Select-Object -First 5) {
+            $msg = $c.Message; if ($msg.Length -gt 20) { $msg = $msg.Substring(0, 19) + '…' }
+            $lines += "$($TH.D) $($c.Hash)$($TH.G) $msg"
         }
     }
     if (-not $lines.Count) { $lines = @("$($TH.D)no commits today") }
@@ -78,7 +73,7 @@ function Get-GitPanelLines {
 }
 
 function Build-DashFrame {
-    param($Config, [string[]]$GitLines, $Snap, $Stats, [double[]]$CpuHist, [int]$W, [int]$H, $Mem, [string]$MemMsg = '')
+    param([string[]]$GitLines, $Snap, $Stats, [double[]]$CpuHist, [int]$W, [int]$H, $Mem, [string]$MemMsg = '')
     $ph = $H - 2
     $lw = 34; $rw = 32; $mw = $W - $lw - $rw
 
@@ -174,7 +169,7 @@ function Show-LiveDashboard {
             $cpuHist = @($cpuHist + [double]$stats.cpu | Select-Object -Last 60)
             if ($tick -gt 0 -and $tick % 15 -eq 0) { $summary = Get-DaySnapSummary $Config $LogPath }
             $snap = [pscustomobject]@{ Focused = Get-FocusedProcessName; IdleSec = Get-IdleSeconds; Summary = $summary }
-            $frame = Build-DashFrame -Config $Config -GitLines $gitLines -Snap $snap -Stats $stats -CpuHist $cpuHist -W $W -H $H -Mem $mem -MemMsg $memMsg
+            $frame = Build-DashFrame -GitLines $gitLines -Snap $snap -Stats $stats -CpuHist $cpuHist -W $W -H $H -Mem $mem -MemMsg $memMsg
             [Console]::SetCursorPosition(0, 0)
             Write-Host ($frame -join "`n") -NoNewline
             $tick++

@@ -31,13 +31,12 @@ if ($found.Count -ne 1 -or $found[0] -notlike '*repo1') {
 # --- dashboard frame geometry: every line exactly W wide, ph+1 lines ---
 . "$PSScriptRoot\report.ps1"
 . "$PSScriptRoot\dashboard.ps1"
-$cfg = Get-Content "$PSScriptRoot\config.json" -Raw | ConvertFrom-Json
 $stats = [pscustomobject]@{ cpu = 42; gpu = '10% 60C'; ram_used = 8.5; ram_total = 16; disks = @('C: 1/2 GB', 'X: 3/4 GB') }
 $snap = [pscustomobject]@{ Focused = 'Code'; IdleSec = 1.5; Summary = $null }
 foreach ($dim in @(@(120, 30), @(110, 24), @(160, 45))) {
     $W = $dim[0]; $H = $dim[1]
     $mem = [pscustomobject]@{ total = 16; in_use = 9.25; standby = 4.5; modified = 0.25; free = 2 }
-    $frame = @(Build-DashFrame -Config $cfg -GitLines @('plain', "$($TH.B)colored line") -Snap $snap -Stats $stats -CpuHist @(0, 30, 100) -W $W -H $H -Mem $mem -MemMsg 'freed 2.5 GB')
+    $frame = @(Build-DashFrame -GitLines @('plain', "$($TH.B)colored line") -Snap $snap -Stats $stats -CpuHist @(0, 30, 100) -W $W -H $H -Mem $mem -MemMsg 'freed 2.5 GB')
     if ($frame.Count -ne $H - 1) { throw "frame ${W}x${H}: expected $($H - 1) lines, got $($frame.Count)" }
     $bad = $frame[0..($H - 3)] | Where-Object { (Get-VisLen $_) -ne $W }
     if ($bad) { throw "frame ${W}x${H}: ragged lines (visible width != $W):`n$($bad -join "`n")" }

@@ -21,21 +21,9 @@ function Get-ReportData {
     param($Config, [datetime]$Date, [string]$LogPath)
     $day = $Date.ToString('yyyy-MM-dd')
 
-    $repos = @()
-    foreach ($root in $Config.git_roots) {
-        foreach ($repo in Find-Repos -Root $root) {
-            $commits = @(Get-DayCommits -Repo $repo -Date $Date)
-            if (-not $commits.Count) { continue }
-            $repos += [pscustomobject]@{
-                Path = $repo; Name = Split-Path $repo -Leaf
-                Commits = $commits; NetLines = ($commits | Measure-Object NetLines -Sum).Sum
-            }
-        }
-    }
-
     [pscustomobject]@{
         Day   = $day
-        Repos = $repos
+        Repos = @(Get-DayRepoCommits -Config $Config -Date $Date)
         Stats = if ($day -eq (Get-Date).ToString('yyyy-MM-dd')) { Get-SystemStats } else { $null }
         Act   = Get-DaySnapSummary -Config $Config -LogPath $LogPath -Date $Date
     }

@@ -38,3 +38,18 @@ function Get-DayCommits {
     if (-not $out) { return @() }
     ConvertFrom-NumstatLog -Lines @($out)
 }
+
+# Every repo under the config roots with commits on $Date, plus per-repo totals.
+function Get-DayRepoCommits {
+    param($Config, [datetime]$Date = (Get-Date))
+    foreach ($root in $Config.git_roots) {
+        foreach ($repo in Find-Repos -Root $root) {
+            $commits = @(Get-DayCommits -Repo $repo -Date $Date)
+            if (-not $commits.Count) { continue }
+            [pscustomobject]@{
+                Path = $repo; Name = Split-Path $repo -Leaf
+                Commits = $commits; NetLines = ($commits | Measure-Object NetLines -Sum).Sum
+            }
+        }
+    }
+}
