@@ -31,6 +31,15 @@ $hadConfig = Test-Path "$dest\config.json"   # update: keep the user's config
 Get-ChildItem "$tmp\shipd-master" | Where-Object { -not ($hadConfig -and $_.Name -eq 'config.json') } |
     Copy-Item -Destination $dest -Recurse -Force
 Remove-Item -Recurse -Force $tmp
+
+# ── 2b. Generate CMD wrapper ──
+$cmdContent = @"
+@echo off
+`"$pwsh`" -NoProfile -File "%LOCALAPPDATA%\shipd\shipd.ps1" %*
+"@
+$cmdPath = Join-Path $dest 'shipd.cmd'
+Set-Content -Path $cmdPath -Value $cmdContent -Force
+
 Get-ChildItem $dest -Recurse -File | Unblock-File   # drop mark-of-the-web so RemoteSigned policy runs it
 
 # ── 3. fresh install: point the GIT panel at their projects ──
@@ -54,6 +63,46 @@ $ps5profile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPo
 if (-not (Test-Path $ps5profile)) { New-Item -ItemType File -Force $ps5profile | Out-Null }
 if ("$(Get-Content $ps5profile -Raw)" -notmatch 'function shipd') {   # "$()": empty file gives $null, and $null -notmatch returns @() (falsy)
     Add-Content $ps5profile "`nfunction shipd { & `"$pwsh`" -NoProfile -File `"$dest\shipd.ps1`" @args }"
+}
+
+# ── 6. add %LOCALAPPDATA%\shipd to User PATH if not present ──
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$pathEntries = @()
+if ($userPath) {
+    $pathEntries = @($userPath -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+$found = $false
+foreach ($entry in $pathEntries) {
+    try {
+        $expanded = [Environment]::ExpandEnvironmentVariables($entry)
+        if ($expanded -eq $dest -or $entry -eq $dest -or $entry -eq '%LOCALAPPDATA%\shipd') {
+            $found = $true
+            break
+        }
+    } catch {}
+}
+if (-not $found) {
+    $newPath = ($pathEntries + '%LOCALAPPDATA%\shipd') -join ';'
+    [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+    Write-Host "Added %LOCALAPPDATA%\shipd to persistent User PATH"
+}
+
+# Update current process PATH
+$processPathEntries = @($env:PATH -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$foundProcess = $false
+foreach ($entry in $processPathEntries) {
+    try {
+        $expanded = [Environment]::ExpandEnvironmentVariables($entry)
+        if ($expanded -eq $dest -or $entry -eq $dest) {
+            $foundProcess = $true
+            break
+        }
+    } catch {}
+}
+if (-not $foundProcess) {
+    $newProcessPath = ($processPathEntries + $dest) -join ';'
+    $env:PATH = $newProcessPath
+    Write-Host "Updated current process PATH"
 }
 
 Write-Host ''
