@@ -8,12 +8,12 @@ param(
     [Parameter(Position = 1)][datetime]$Date = (Get-Date)
 )
 
-$config = Get-Content (Join-Path $PSScriptRoot 'config.json') -Raw | ConvertFrom-Json
-. (Join-Path $PSScriptRoot 'git_scan.ps1')
-. (Join-Path $PSScriptRoot 'activity.ps1')
-. (Join-Path $PSScriptRoot 'memory.ps1')
-. (Join-Path $PSScriptRoot 'report.ps1')
-. (Join-Path $PSScriptRoot 'dashboard.ps1')
+$config = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'config.json') -Raw | ConvertFrom-Json
+. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'git_scan.ps1'))
+. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'activity.ps1'))
+. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'memory.ps1'))
+. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'report.ps1'))
+. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'dashboard.ps1'))
 $logPath = Join-Path $PSScriptRoot 'snapshots.jsonl'
 $reportsDir = Join-Path $PSScriptRoot 'reports'
 
@@ -25,15 +25,15 @@ switch ($Command) {
 
     'snapshot' {
         $snap = Get-ActivitySnapshot $config
-        ($snap | ConvertTo-Json -Compress) | Add-Content $logPath
+        ($snap | ConvertTo-Json -Compress) | Add-Content -LiteralPath $logPath
         Write-Output "snapshot saved: focused=$($snap.focused) idle=$($snap.idle_seconds)s games=$($snap.games_running -join ',')"
     }
 
     'report' {
         $data = Get-ReportData -Config $config -Date $Date -LogPath $logPath
         Show-Dashboard $data
-        New-Item -ItemType Directory -Force $reportsDir | Out-Null
-        Format-ReportText $data | Set-Content (Join-Path $reportsDir "$($data.Day).txt")
+        [void][System.IO.Directory]::CreateDirectory($reportsDir)
+        Format-ReportText $data | Set-Content -LiteralPath (Join-Path $reportsDir "$($data.Day).txt")
     }
 
     'install' {

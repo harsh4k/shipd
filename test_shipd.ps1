@@ -1,6 +1,6 @@
 # Minimal self-checks: numstat parser + repo-scan pruning.
 $ErrorActionPreference = 'Stop'
-. "$PSScriptRoot\git_scan.ps1"
+. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'git_scan.ps1'))
 
 # --- numstat parser ---
 $lines = @(
@@ -29,8 +29,8 @@ if ($found.Count -ne 1 -or $found[0] -notlike '*repo1') {
 }
 
 # --- dashboard frame geometry: every line exactly W wide, ph+1 lines ---
-. "$PSScriptRoot\report.ps1"
-. "$PSScriptRoot\dashboard.ps1"
+. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'report.ps1'))
+. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'dashboard.ps1'))
 $stats = [pscustomobject]@{ cpu = 42; gpu = '10% 60C'; ram_used = 8.5; ram_total = 16; disks = @('C: 1/2 GB', 'X: 3/4 GB') }
 $snap = [pscustomobject]@{ Focused = 'Code'; IdleSec = 1.5; Summary = $null }
 foreach ($dim in @(@(120, 30), @(110, 24), @(160, 45))) {
@@ -43,7 +43,7 @@ foreach ($dim in @(@(120, 30), @(110, 24), @(160, 45))) {
 }
 
 # --- memory breakdown sanity ---
-. "$PSScriptRoot\memory.ps1"
+. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'memory.ps1'))
 $m = Get-MemoryBreakdown
 if ($null -ne $m) {
     foreach ($p in 'total', 'in_use', 'standby', 'modified', 'free') {

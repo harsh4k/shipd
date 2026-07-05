@@ -24,7 +24,7 @@ $script:DigitFont = @{
 }
 
 function Get-BigClock {
-    $chars = (Get-Date).ToString('HH:mm:ss').ToCharArray()
+    $chars = (Get-Date).ToString('HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture).ToCharArray()
     foreach ($r in 0..4) {
         -join ($chars | ForEach-Object { $script:DigitFont["$_"][$r] + ' ' })
     }

@@ -31,6 +31,15 @@ $hadConfig = Test-Path "$dest\config.json"   # update: keep the user's config
 Get-ChildItem "$tmp\shipd-master" | Where-Object { -not ($hadConfig -and $_.Name -eq 'config.json') } |
     Copy-Item -Destination $dest -Recurse -Force
 Remove-Item -Recurse -Force $tmp
+
+# ── 2b. Generate CMD wrapper ──
+$cmdContent = @"
+@echo off
+`"$pwsh`" -NoProfile -File "%LOCALAPPDATA%\shipd\shipd.ps1" %*
+"@
+$cmdPath = Join-Path $dest 'shipd.cmd'
+Set-Content -Path $cmdPath -Value $cmdContent -Force
+
 Get-ChildItem $dest -Recurse -File | Unblock-File   # drop mark-of-the-web so RemoteSigned policy runs it
 
 # ── 3. fresh install: point the GIT panel at their projects ──
@@ -56,5 +65,61 @@ if ("$(Get-Content $ps5profile -Raw)" -notmatch 'function shipd') {   # "$()": e
     Add-Content $ps5profile "`nfunction shipd { & `"$pwsh`" -NoProfile -File `"$dest\shipd.ps1`" @args }"
 }
 
+# ── 6. add %LOCALAPPDATA%\shipd to User PATH if not present ──
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$pathEntries = @()
+if ($userPath) {
+    $pathEntries = @($userPath -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+$found = $false
+foreach ($entry in $pathEntries) {
+    try {
+        $expanded = [Environment]::ExpandEnvironmentVariables($entry)
+        if ($expanded -eq $dest -or $entry -eq $dest -or $entry -eq '%LOCALAPPDATA%\shipd') {
+            $found = $true
+            break
+        }
+    } catch {}
+}
+if (-not $found) {
+    $newPath = ($pathEntries + '%LOCALAPPDATA%\shipd') -join ';'
+    Set-ItemProperty -Path 'HKCU:\Environment' -Name 'Path' -Value $newPath -Type ExpandString
+    Write-Host "Added %LOCALAPPDATA%\shipd to persistent User PATH"
+    
+    # Broadcast environment change so new terminals pick it up instantly without logging off/rebooting
+    try {
+        $sig = '[DllImport("user32.dll",SetLastError=true,CharSet=CharSet.Auto)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);'
+        $win32 = Add-Type -MemberDefinition $sig -Name "Win32SendMessage" -Namespace "Win32" -PassThru -ErrorAction SilentlyContinue
+        if ($win32) {
+            $result = [IntPtr]::Zero
+            [void]$win32::SendMessageTimeout([IntPtr]0xffff, 0x001A, [IntPtr]::Zero, "Environment", 2, 5000, [ref]$result)
+        }
+    } catch {}
+}
+
+# Update current process PATH
+$processPathEntries = @($env:PATH -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$foundProcess = $false
+foreach ($entry in $processPathEntries) {
+    try {
+        $expanded = [Environment]::ExpandEnvironmentVariables($entry)
+        if ($expanded -eq $dest -or $entry -eq $dest) {
+            $foundProcess = $true
+            break
+        }
+    } catch {}
+}
+if (-not $foundProcess) {
+    $newProcessPath = ($processPathEntries + $dest) -join ';'
+    $env:PATH = $newProcessPath
+    Write-Host "Updated current process PATH"
+}
+
 Write-Host ''
+# ── 7. helper for CMD that is already open ──
+$batPath = Join-Path $dest 'refresh_shipd_path.bat'
+$batContent = '@echo off && set "PATH=%PATH%;%LOCALAPPDATA%\\shipd" && echo PATH refreshed for this CMD session'
+Set-Content -Path $batPath -Value $batContent -Encoding ASCII -Force
+
+Write-Host "If you have a CMD window already open, run: refresh_shipd_path"
 Write-Host 'shipd installed - open a NEW terminal and type: shipd'

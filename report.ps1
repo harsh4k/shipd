@@ -4,9 +4,9 @@
 # One day of snapshots, summarized. Shared by the daily report and the live dashboard.
 function Get-DaySnapSummary {
     param($Config, [string]$LogPath, [datetime]$Date = (Get-Date))
-    if (-not (Test-Path $LogPath)) { return $null }
+    if (-not (Test-Path -LiteralPath $LogPath)) { return $null }
     # [datetime] cast: ConvertFrom-Json may give a DateTime or a string depending on PS version
-    $snaps = @(Get-Content $LogPath | ForEach-Object { $_ | ConvertFrom-Json } |
+    $snaps = @(Get-Content -LiteralPath $LogPath | ForEach-Object { $_ | ConvertFrom-Json } |
         Where-Object { ([datetime]$_.timestamp).Date -eq $Date.Date })
     if (-not $snaps.Count) { return $null }
     [pscustomobject]@{

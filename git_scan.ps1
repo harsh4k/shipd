@@ -32,8 +32,8 @@ function ConvertFrom-NumstatLog {
 
 function Get-DayCommits {
     param([string]$Repo, [datetime]$Date = (Get-Date))
-    $since = $Date.Date.ToString('yyyy-MM-dd 00:00:00')
-    $until = $Date.Date.AddDays(1).ToString('yyyy-MM-dd 00:00:00')
+    $since = $Date.Date.ToString("yyyy-MM-ddTHH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture)
+    $until = $Date.Date.AddDays(1).ToString("yyyy-MM-ddTHH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture)
     $out = git -C $Repo log "--since=$since" "--until=$until" --pretty=format:"COMMIT|%h|%s" --numstat 2>$null
     if (-not $out) { return @() }
     ConvertFrom-NumstatLog -Lines @($out)
@@ -47,7 +47,7 @@ function Get-DayRepoCommits {
             $commits = @(Get-DayCommits -Repo $repo -Date $Date)
             if (-not $commits.Count) { continue }
             [pscustomobject]@{
-                Path = $repo; Name = Split-Path $repo -Leaf
+                Path = $repo; Name = [System.IO.Path]::GetFileName($repo)
                 Commits = $commits; NetLines = ($commits | Measure-Object NetLines -Sum).Sum
             }
         }

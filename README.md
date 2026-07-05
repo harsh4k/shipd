@@ -1,6 +1,6 @@
 # shipd
 
-A daily dev + activity report for Windows, written in pure PowerShell. No dependencies, no accounts, no telemetry — all data stays in this folder.
+A daily dev + activity report for Windows, written in pure PowerShell. No dependencies, no accounts, no telemetry — all data stays in this folder. Works seamlessly in both PowerShell and Command Prompt (`cmd.exe`).
 
 Every 10 minutes it takes a silent snapshot of what you're doing (focused app, idle time, running games). Every evening it builds a report combining that with your git commits across all your projects, plus system stats.
 
@@ -22,7 +22,7 @@ irm https://raw.githubusercontent.com/harsh4k/shipd/master/install.ps1 | iex
 
 It downloads shipd to `%LOCALAPPDATA%\shipd`, asks one question (where your
 projects live), adds the `shipd` command to your terminal, and starts the
-background tracking. Then open a **new** terminal and type `shipd`.
+background tracking. Then open a **new** terminal (either PowerShell or Command Prompt) and type `shipd`.
 
 Re-running the same line later **updates** shipd without touching your config,
 snapshots, or reports. If you don't have PowerShell 7 yet, the installer
@@ -100,7 +100,7 @@ Snapshots record your focused app, idle time, and the names of running processes
 ## Troubleshooting
 
 - **"running scripts is disabled"** → `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
-- **`shipd` not recognized** → run `.\shipd.ps1 install`, then open a new terminal
+- **`shipd` not recognized** → run `install.ps1` to configure PowerShell profiles and the CMD path wrapper, then open a new terminal
 - **Report shows no commits** → check `git_roots` in `config.json` actually contains your repos
 - **No snapshots appearing** → `Get-ScheduledTask 'shipd snapshot'` should show *Ready*; if missing, run `shipd schedule`
 
