@@ -1,9 +1,9 @@
 # shipd — daily dev + activity report.
-# Usage: shipd [dashboard] | snapshot | report [date] | mem | free | list | install | schedule | start | stop | restart | unschedule
+# Usage: shipd [dashboard] | snapshot | report [date] | mem | free | install | schedule | start | stop | restart | unschedule
 # No command = dashboard.
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('dashboard', 'snapshot', 'report', 'mem', 'free', 'list', 'install', 'schedule', 'start', 'stop', 'restart', 'unschedule')]
+    [ValidateSet('dashboard', 'snapshot', 'report', 'mem', 'free', 'install', 'schedule', 'start', 'stop', 'restart', 'unschedule')]
     [string]$Command = 'dashboard',
     [Parameter(Position = 1)][datetime]$Date = (Get-Date)
 )
@@ -44,13 +44,6 @@ switch ($Command) {
             Add-Content $profilePath "`nfunction shipd { & '$PSCommandPath' @args }"
         }
         Write-Output "installed: open a NEW terminal, then run 'shipd report' from any folder"
-    }
-
-    'list' {
-        if (Test-Path $reportsDir) {
-            Get-ChildItem $reportsDir -Filter '*.txt' | Sort-Object Name | ForEach-Object { Write-Output $_.Name }
-        }
-        else { Write-Output 'no saved reports yet' }
     }
 
     'mem' {

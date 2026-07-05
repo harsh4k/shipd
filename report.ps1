@@ -1,6 +1,22 @@
 # Report data + rendering. Terminal dashboard uses $PSStyle (pwsh 7 built-in, no deps);
 # the saved reports\<date>.txt stays plain text.
 
+# One day of snapshots, summarized. Shared by the daily report and the live dashboard.
+function Get-DaySnapSummary {
+    param($Config, [string]$LogPath, [datetime]$Date = (Get-Date))
+    if (-not (Test-Path $LogPath)) { return $null }
+    # [datetime] cast: ConvertFrom-Json may give a DateTime or a string depending on PS version
+    $snaps = @(Get-Content $LogPath | ForEach-Object { $_ | ConvertFrom-Json } |
+        Where-Object { ([datetime]$_.timestamp).Date -eq $Date.Date })
+    if (-not $snaps.Count) { return $null }
+    [pscustomobject]@{
+        Count = $snaps.Count
+        Idle  = @($snaps | Where-Object { $_.idle_seconds -ge $Config.idle_threshold_seconds }).Count
+        Focus = @($snaps | Group-Object focused | Sort-Object Count -Descending)
+        Games = @($snaps | ForEach-Object { $_.games_running } | Sort-Object -Unique)
+    }
+}
+
 function Get-ReportData {
     param($Config, [datetime]$Date, [string]$LogPath)
     $day = $Date.ToString('yyyy-MM-dd')
@@ -17,21 +33,11 @@ function Get-ReportData {
         }
     }
 
-    $snaps = @()
-    if (Test-Path $LogPath) {
-        # [datetime] cast: ConvertFrom-Json may give a DateTime or a string depending on PS version
-        $snaps = @(Get-Content $LogPath | ForEach-Object { $_ | ConvertFrom-Json } |
-            Where-Object { ([datetime]$_.timestamp).Date -eq $Date.Date })
-    }
-
     [pscustomobject]@{
-        Day       = $day
-        Repos     = $repos
-        Stats     = if ($day -eq (Get-Date).ToString('yyyy-MM-dd')) { Get-SystemStats } else { $null }
-        Snaps     = $snaps
-        Focus     = @($snaps | Group-Object focused | Sort-Object Count -Descending)
-        IdleCount = @($snaps | Where-Object { $_.idle_seconds -ge $Config.idle_threshold_seconds }).Count
-        Games     = @($snaps | ForEach-Object { $_.games_running } | Sort-Object -Unique)
+        Day   = $day
+        Repos = $repos
+        Stats = if ($day -eq (Get-Date).ToString('yyyy-MM-dd')) { Get-SystemStats } else { $null }
+        Act   = Get-DaySnapSummary -Config $Config -LogPath $LogPath -Date $Date
     }
 }
 
@@ -79,16 +85,16 @@ function Show-Dashboard {
     Write-Host ''
 
     Write-Host "$ye ACTIVITY$r"
-    if (-not $Data.Snaps.Count) { Write-Host "$dim   no snapshots$r" }
+    $a = $Data.Act
+    if (-not $a) { Write-Host "$dim   no snapshots$r" }
     else {
-        $active = $Data.Snaps.Count - $Data.IdleCount
-        Write-Host "   $($Data.Snaps.Count) snapshots · $gr$active active$r · $dim$($Data.IdleCount) idle$r"
-        $max = ($Data.Focus | Measure-Object Count -Maximum).Maximum
-        foreach ($g in $Data.Focus | Select-Object -First 8) {
+        Write-Host "   $($a.Count) snapshots · $gr$($a.Count - $a.Idle) active$r · $dim$($a.Idle) idle$r"
+        $max = ($a.Focus | Measure-Object Count -Maximum).Maximum
+        foreach ($g in $a.Focus | Select-Object -First 8) {
             $name = if ($g.Name) { $g.Name } else { '(unknown)' }
             Write-Host ("   {0,-22} $cy$(Get-Bar ($g.Count / $max * 100) 16)$r {1}" -f $name, $g.Count)
         }
-        if ($Data.Games.Count) { Write-Host "   ${re}games seen: $($Data.Games -join ', ')$r" }
+        if ($a.Games.Count) { Write-Host "   ${re}games seen: $($a.Games -join ', ')$r" }
     }
     Write-Host ''
 }
@@ -118,14 +124,15 @@ function Format-ReportText {
     $L += ''
 
     $L += 'ACTIVITY'
-    if (-not $Data.Snaps.Count) { $L += '  no snapshots' }
+    $a = $Data.Act
+    if (-not $a) { $L += '  no snapshots' }
     else {
-        $L += "  snapshots: $($Data.Snaps.Count) ($($Data.Snaps.Count - $Data.IdleCount) active, $($Data.IdleCount) idle)"
-        foreach ($g in $Data.Focus) {
+        $L += "  snapshots: $($a.Count) ($($a.Count - $a.Idle) active, $($a.Idle) idle)"
+        foreach ($g in $a.Focus) {
             $name = if ($g.Name) { $g.Name } else { '(unknown)' }
             $L += ('    {0,-24} {1}' -f $name, $g.Count)
         }
-        if ($Data.Games.Count) { $L += "  games seen: $($Data.Games -join ', ')" }
+        if ($a.Games.Count) { $L += "  games seen: $($a.Games -join ', ')" }
     }
     $L
 }

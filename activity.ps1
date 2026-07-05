@@ -64,7 +64,5 @@ function Get-ActivitySnapshot {
         focused       = Get-FocusedProcessName
         idle_seconds  = Get-IdleSeconds
         games_running = @($procs | Where-Object { $games -contains $_ })
-        process_count = $procs.Count
-        processes     = $procs
     }
 }

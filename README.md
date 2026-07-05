@@ -31,7 +31,6 @@ Open a **new** terminal, and `shipd` works from any folder.
 | `shipd` | Live dashboard in your terminal |
 | `shipd report` | Today's report (also saved to `reports\<date>.txt`) |
 | `shipd report 2026-07-01` | Report for a past date |
-| `shipd list` | List all saved reports |
 | `shipd snapshot` | Take one activity snapshot manually |
 | `shipd mem` | RAM breakdown: in use / standby cache / modified / free |
 | `shipd free` | Free RAM by purging the standby cache (admin prompt; also the `f` key in the dashboard) |

@@ -77,20 +77,6 @@ function Get-GitPanelLines {
     $lines
 }
 
-function Get-TodaySnapSummary {
-    param($Config, [string]$LogPath)
-    if (-not (Test-Path $LogPath)) { return $null }
-    $snaps = @(Get-Content $LogPath | ForEach-Object { ConvertFrom-Json $_ } |
-        Where-Object { ([datetime]$_.timestamp).Date -eq (Get-Date).Date })
-    if (-not $snaps.Count) { return $null }
-    [pscustomobject]@{
-        Count = $snaps.Count
-        Idle  = @($snaps | Where-Object { $_.idle_seconds -ge $Config.idle_threshold_seconds }).Count
-        Focus = @($snaps | Group-Object focused | Sort-Object Count -Descending)
-        Games = @($snaps | ForEach-Object { $_.games_running } | Sort-Object -Unique)
-    }
-}
-
 function Build-DashFrame {
     param($Config, [string[]]$GitLines, $Snap, $Stats, [double[]]$CpuHist, [int]$W, [int]$H, $Mem, [string]$MemMsg = '')
     $ph = $H - 2
@@ -169,7 +155,7 @@ function Show-LiveDashboard {
         return
     }
     $gitLines = Get-GitPanelLines $Config
-    $summary = Get-TodaySnapSummary $Config $LogPath
+    $summary = Get-DaySnapSummary $Config $LogPath
     $cpuHist = @()
     $tick = 0
     $memMsg = ''; $memMsgTicks = 0
@@ -186,7 +172,7 @@ function Show-LiveDashboard {
             $mem = Get-MemoryBreakdown
             if ($memMsgTicks -gt 0) { $memMsgTicks-- } else { $memMsg = '' }
             $cpuHist = @($cpuHist + [double]$stats.cpu | Select-Object -Last 60)
-            if ($tick -gt 0 -and $tick % 15 -eq 0) { $summary = Get-TodaySnapSummary $Config $LogPath }
+            if ($tick -gt 0 -and $tick % 15 -eq 0) { $summary = Get-DaySnapSummary $Config $LogPath }
             $snap = [pscustomobject]@{ Focused = Get-FocusedProcessName; IdleSec = Get-IdleSeconds; Summary = $summary }
             $frame = Build-DashFrame -Config $Config -GitLines $gitLines -Snap $snap -Stats $stats -CpuHist $cpuHist -W $W -H $H -Mem $mem -MemMsg $memMsg
             [Console]::SetCursorPosition(0, 0)
