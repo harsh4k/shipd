@@ -116,4 +116,10 @@ if (-not $foundProcess) {
 }
 
 Write-Host ''
+# ── 7. helper for CMD that is already open ──
+$batPath = Join-Path $dest 'refresh_shipd_path.bat'
+$batContent = '@echo off && set "PATH=%PATH%;%LOCALAPPDATA%\\shipd" && echo PATH refreshed for this CMD session'
+Set-Content -Path $batPath -Value $batContent -Encoding ASCII -Force
+
+Write-Host "If you have a CMD window already open, run: refresh_shipd_path"
 Write-Host 'shipd installed - open a NEW terminal and type: shipd'
