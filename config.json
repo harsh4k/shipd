@@ -1,5 +1,5 @@
 {
-  "git_roots": ["C:\\Users\\krish\\OneDrive\\Desktop\\[Z+ All-Things]\\#Current Work\\Forked-Projects"],
+  "git_roots": ["X:\\Projects"],
   "known_games": ["steam.exe", "valorant.exe", "cs2.exe", "RocketLeague.exe"],
   "idle_threshold_seconds": 300,
   "snapshot_interval_minutes": 10,
