@@ -1,3 +1,6 @@
 # personal activity data — never commit
 snapshots.jsonl
 reports/
+
+# agent scratch files — never commit
+.agents/
