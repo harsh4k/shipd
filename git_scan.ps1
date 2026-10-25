@@ -30,18 +30,20 @@ function ConvertFrom-NumstatLog {
     $commits
 }
 
-# Your commits on $Date across every local branch (+ HEAD, for detached checkouts).
+# Your commits on $Date across every local branch.
 # "Yours" = $AuthorEmails if given (config author_emails), else the repo's user.email;
 # if neither is set, every author counts rather than silently showing nothing.
 function Get-DayCommits {
     param([string]$Repo, [datetime]$Date = (Get-Date), [string[]]$AuthorEmails)
     $since = $Date.Date.ToString("yyyy-MM-ddTHH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture)
     $until = $Date.Date.AddDays(1).ToString("yyyy-MM-ddTHH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture)
+    # per repo, not once globally: includeIf lets work and personal folders use different emails
     if (-not $AuthorEmails) { $AuthorEmails = @(git -C $Repo config user.email 2>$null) }
-    # --fixed-strings + "<email>" = exact match on the address in "Name <email>", no regex surprises
+    # "<email>" + fixed-strings = exact address match inside "Name <email>"; emails are case-insensitive
     $authorArgs = @($AuthorEmails | Where-Object { $_ } | ForEach-Object { "--author=<$_>" })
-    if ($authorArgs) { $authorArgs += '--fixed-strings' }
-    $out = git -C $Repo log --branches HEAD @authorArgs "--since=$since" "--until=$until" --pretty=format:"COMMIT|%h|%s" --numstat 2>$null
+    if ($authorArgs) { $authorArgs += '--fixed-strings', '--regexp-ignore-case' }
+    # no bare HEAD: it is fatal on an unborn/orphan branch; trailing -- so a file named like a ref can't confuse git
+    $out = git -C $Repo log --branches @authorArgs "--since=$since" "--until=$until" --pretty=format:"COMMIT|%h|%s" --numstat -- 2>$null
     if (-not $out) { return @() }
     ConvertFrom-NumstatLog -Lines @($out)
 }
@@ -49,9 +51,12 @@ function Get-DayCommits {
 # Every repo under the config roots with commits on $Date, plus per-repo totals.
 function Get-DayRepoCommits {
     param($Config, [datetime]$Date = (Get-Date))
+    # linked worktrees share their main checkout's branches: count each commit once, first repo found wins
+    $seen = [System.Collections.Generic.HashSet[string]]::new()
     foreach ($root in $Config.git_roots) {
         foreach ($repo in Find-Repos -Root $root) {
-            $commits = @(Get-DayCommits -Repo $repo -Date $Date -AuthorEmails $Config.author_emails)
+            $commits = @(Get-DayCommits -Repo $repo -Date $Date -AuthorEmails $Config.author_emails |
+                Where-Object { $seen.Add("$($_.Hash)|$($_.Message)") })
             if (-not $commits.Count) { continue }
             [pscustomobject]@{
                 Path = $repo; Name = [System.IO.Path]::GetFileName($repo)

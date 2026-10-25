@@ -26,7 +26,7 @@ switch ($Command) {
 
     'snapshot' {
         $snap = Get-ActivitySnapshot $config
-        ($snap | ConvertTo-Json -Compress) | Add-Content -LiteralPath $logPath
+        Add-SnapshotLine -LogPath $logPath -Snapshot $snap
         Write-Output "snapshot saved: focused=$($snap.focused) idle=$($snap.idle_seconds)s games=$($snap.games_running -join ',')"
     }
 
@@ -42,7 +42,8 @@ switch ($Command) {
         $profilePath = $PROFILE.CurrentUserAllHosts
         if (-not (Test-Path -LiteralPath $profilePath)) { New-Item -ItemType File -Force -Path $profilePath | Out-Null }
         if ("$(Get-Content -LiteralPath $profilePath -Raw)" -notmatch 'function shipd') {   # "$()": empty file gives $null, and $null -notmatch returns @() (falsy)
-            $quoted = $PSCommandPath -replace "'", "''"   # single-quoted string: an apostrophe in the path must be doubled
+            # escapes every quote PowerShell accepts as a delimiter, typographic ones included
+            $quoted = [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($PSCommandPath)
             Add-Content -LiteralPath $profilePath "`nfunction shipd { & '$quoted' @args }"
         }
         Write-Output "installed: open a NEW terminal, then run 'shipd report' from any folder"

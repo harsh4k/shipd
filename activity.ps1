@@ -23,6 +23,15 @@ function Get-FocusedProcessName {
     if ($procId) { (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName }
 }
 
+# GPU Engine counters have one instance per process per engine ("pid_1234_luid_..._eng_0_engtype_3D").
+# Busy = processes summed per physical engine, then the busiest engine (what Task Manager shows).
+function Get-GpuUtilization {
+    param($Samples)
+    $perEngine = $Samples | Group-Object { $_.InstanceName -replace '^pid_\d+_', '' } |
+        ForEach-Object { ($_.Group | Measure-Object CookedValue -Sum).Sum }
+    [math]::Round([math]::Min(100, [double]($perEngine | Measure-Object -Maximum).Maximum))
+}
+
 # Own stats, PS-native (no psutil/python): CIM for CPU/RAM/disk, nvidia-smi or perf counters for GPU.
 function Get-SystemStats {
     $os = Get-CimInstance Win32_OperatingSystem
@@ -41,9 +50,7 @@ function Get-SystemStats {
     if ($gpu -eq 'N/A') {
         # works for any GPU vendor on Win10+; counter name is localized, so try/catch
         try {
-            $sum = ((Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage').CounterSamples |
-                Measure-Object CookedValue -Sum).Sum
-            $gpu = "$([math]::Round([math]::Min(100, $sum)))%"   # per-engine counters can sum past 100
+            $gpu = "$(Get-GpuUtilization (Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage').CounterSamples)%"
         } catch {}
     }
     [pscustomobject]@{

@@ -42,39 +42,67 @@ foreach ($dim in @(@(120, 30), @(110, 24), @(160, 45))) {
     if ($bad) { throw "frame ${W}x${H}: ragged lines (visible width != $W):`n$($bad -join "`n")" }
 }
 
-# --- snapshot log: a torn last line (crash mid-append) is skipped, other days filtered out ---
+# --- snapshot log: torn line skipped, next append starts a fresh line, other days filtered out ---
 $log = Join-Path ([IO.Path]::GetTempPath()) "shipd_snaps_$(Get-Random).jsonl"
 @(
     '{"timestamp":"2026-07-01T10:00:00","focused":"Code","idle_seconds":1,"games_running":[]}'
     '{"timestamp":"2026-07-02T10:00:00","focused":"Code","idle_seconds":1,"games_running":[]}'
     '{"timestamp":"2026-07-01T10:10:00","focused":"pwsh","idle_seconds":900,"games_running":["steam"]}'
-    '{"timestamp":"2026-07-01T10:20:00","focu'
 ) | Set-Content -LiteralPath $log
+[IO.File]::AppendAllText($log, '{"timestamp":"2026-07-01T10:20:00","focu')   # torn: no trailing newline
+Add-SnapshotLine -LogPath $log -Snapshot ([pscustomobject]@{ timestamp = '2026-07-01T10:30:00'; focused = 'Code'; idle_seconds = 2; games_running = @() })
 $sum = Get-DaySnapSummary -Config ([pscustomobject]@{ idle_threshold_seconds = 300 }) -LogPath $log -Date ([datetime]'2026-07-01')
 Remove-Item -LiteralPath $log
-if ($sum.Count -ne 2) { throw "snap summary: expected 2 snapshots on 2026-07-01, got $($sum.Count)" }
+if ($sum.Count -ne 3) { throw "snap summary: expected 3 snapshots on 2026-07-01 (torn one skipped, appended one kept), got $($sum.Count)" }
 if ($sum.Idle -ne 1) { throw "snap summary: expected 1 idle, got $($sum.Idle)" }
 if ("$($sum.Games)" -ne 'steam') { throw "snap summary: games wrong: $($sum.Games)" }
 
-# --- day commits: only the repo owner's, from every local branch ---
-$repo = Join-Path ([IO.Path]::GetTempPath()) "shipd_git_$(Get-Random)"
+# --- GPU: per-process instances summed per engine, busiest engine wins, capped at 100 ---
+. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'activity.ps1'))
+$s = { param($i, $v) [pscustomobject]@{ InstanceName = $i; CookedValue = $v } }
+$gpuSamples = @(
+    (& $s 'pid_10_luid_0x0_0x1_phys_0_eng_0_engtype_3d' 30), (& $s 'pid_11_luid_0x0_0x1_phys_0_eng_0_engtype_3d' 25)
+    (& $s 'pid_12_luid_0x0_0x1_phys_0_eng_1_engtype_3d' 40)
+)
+if ((Get-GpuUtilization $gpuSamples) -ne 55) { throw "gpu: expected 55 (30+25 on eng_0), got $(Get-GpuUtilization $gpuSamples)" }
+if ((Get-GpuUtilization @((& $s 'pid_1_e' 80), (& $s 'pid_2_e' 70))) -ne 100) { throw 'gpu: expected cap at 100' }
+
+# --- day commits: only the repo owner's (any case), every local branch, worktrees counted once ---
+$root = Join-Path ([IO.Path]::GetTempPath()) "shipd_git_$(Get-Random)"
+$repo = Join-Path $root 'app'
 New-Item -ItemType Directory -Force $repo | Out-Null
-$gitq = { git -C $repo @args 2>&1 | Out-Null }
-& $gitq init -q -b main
-& $gitq config user.email 'me@example.com'
-& $gitq config user.name 'me'
-& $gitq commit -q --allow-empty -m 'mine on main'
-& $gitq -c user.email=other@example.com -c user.name=other commit -q --allow-empty -m 'someone else'
-& $gitq checkout -q -b feature
-& $gitq commit -q --allow-empty -m 'mine on feature'
-& $gitq checkout -q main
-$msgs = @(Get-DayCommits -Repo $repo | ForEach-Object Message)
-$msgsOverride = @(Get-DayCommits -Repo $repo -AuthorEmails @('other@example.com') | ForEach-Object Message)
-Remove-Item -LiteralPath $repo -Recurse -Force
-if (($msgs | Sort-Object) -join '; ' -ne 'mine on feature; mine on main') {
+$day = [datetime]'2026-07-01'
+$env:GIT_AUTHOR_DATE = $env:GIT_COMMITTER_DATE = '2026-07-01T12:00:00'   # fixed day: no midnight flake
+function Invoke-TestGit {
+    # signing/hooks off so a developer's global git config can't break the fixture; failures are shown
+    $o = git -c commit.gpgsign=false -c core.hooksPath= -C $repo @args 2>&1
+    if ($LASTEXITCODE) { throw "git $($args -join ' ') failed: $o" }
+}
+try {
+    Invoke-TestGit init -q -b main
+    Invoke-TestGit config user.email 'me@example.com'
+    Invoke-TestGit config user.name 'me'
+    Invoke-TestGit commit -q --allow-empty -m 'mine on main'
+    Invoke-TestGit -c user.email=Me@Example.COM commit -q --allow-empty -m 'mine, other case'
+    Invoke-TestGit -c user.email=other@example.com -c user.name=other commit -q --allow-empty -m 'someone else'
+    Invoke-TestGit checkout -q -b feature
+    Invoke-TestGit commit -q --allow-empty -m 'mine on feature'
+    Invoke-TestGit worktree add -q (Join-Path $root 'app-wt') main
+    Invoke-TestGit checkout -q --orphan fresh   # unborn HEAD must not hide the other branches
+    $msgs = @(Get-DayCommits -Repo $repo -Date $day | ForEach-Object Message)
+    $msgsOverride = @(Get-DayCommits -Repo $repo -Date $day -AuthorEmails @('other@example.com') | ForEach-Object Message)
+    $repos = @(Get-DayRepoCommits -Config ([pscustomobject]@{ git_roots = @($root) }) -Date $day)
+}
+finally {
+    Remove-Item Env:GIT_AUTHOR_DATE, Env:GIT_COMMITTER_DATE
+    Remove-Item -LiteralPath $root -Recurse -Force
+}
+if (($msgs | Sort-Object) -join '; ' -ne 'mine on feature; mine on main; mine, other case') {
     throw "day commits: expected only my commits from all branches, got: $($msgs -join '; ')"
 }
 if ("$msgsOverride" -ne 'someone else') { throw "day commits: author_emails override ignored, got: $($msgsOverride -join '; ')" }
+$total = ($repos | ForEach-Object { $_.Commits.Count } | Measure-Object -Sum).Sum
+if ($total -ne 3) { throw "day repo commits: worktree double-counted, expected 3 commits total, got $total across $($repos.Count) repos" }
 
 # --- memory breakdown sanity ---
 . (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'memory.ps1'))

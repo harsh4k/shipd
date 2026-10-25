@@ -25,12 +25,12 @@ $tmp = Join-Path $env:TEMP "shipd_install_$(Get-Random)"
 New-Item -ItemType Directory -Force $tmp | Out-Null
 Write-Host 'downloading shipd...'
 Invoke-WebRequest 'https://github.com/harsh4k/shipd/archive/refs/heads/master.zip' -OutFile "$tmp\shipd.zip" -UseBasicParsing
-Expand-Archive "$tmp\shipd.zip" $tmp -Force
+Expand-Archive -LiteralPath "$tmp\shipd.zip" -DestinationPath $tmp -Force
 New-Item -ItemType Directory -Force $dest | Out-Null
 $hadConfig = Test-Path -LiteralPath "$dest\config.json"   # update: keep the user's config
-Get-ChildItem "$tmp\shipd-master" | Where-Object { -not ($hadConfig -and $_.Name -eq 'config.json') } |
+Get-ChildItem -LiteralPath "$tmp\shipd-master" | Where-Object { -not ($hadConfig -and $_.Name -eq 'config.json') } |
     Copy-Item -Destination $dest -Recurse -Force
-Remove-Item -Recurse -Force $tmp
+Remove-Item -LiteralPath $tmp -Recurse -Force
 
 # ── 2b. Generate CMD wrapper ──
 $cmdContent = @"
@@ -40,7 +40,7 @@ $cmdContent = @"
 $cmdPath = Join-Path $dest 'shipd.cmd'
 Set-Content -LiteralPath $cmdPath -Value $cmdContent -Force
 
-Get-ChildItem $dest -Recurse -File | Unblock-File   # drop mark-of-the-web so RemoteSigned policy runs it
+Get-ChildItem -LiteralPath $dest -Recurse -File | Unblock-File   # drop mark-of-the-web so RemoteSigned policy runs it
 
 # ── 3. fresh install: point the GIT panel at their projects ──
 if (-not $hadConfig) {
@@ -119,7 +119,7 @@ Write-Host ''
 # ── 7. helper for CMD that is already open ──
 $batPath = Join-Path $dest 'refresh_shipd_path.bat'
 $batContent = '@echo off && set "PATH=%PATH%;%LOCALAPPDATA%\\shipd" && echo PATH refreshed for this CMD session'
-Set-Content -Path $batPath -Value $batContent -Encoding ASCII -Force
+Set-Content -LiteralPath $batPath -Value $batContent -Encoding ASCII -Force
 
 Write-Host "If you have a CMD window already open, run: refresh_shipd_path"
 Write-Host 'shipd installed - open a NEW terminal and type: shipd'
