@@ -5,9 +5,13 @@
 function Get-DaySnapSummary {
     param($Config, [string]$LogPath, [datetime]$Date = (Get-Date))
     if (-not (Test-Path -LiteralPath $LogPath)) { return $null }
-    # [datetime] cast: ConvertFrom-Json may give a DateTime or a string depending on PS version
-    $snaps = @(Get-Content -LiteralPath $LogPath | ForEach-Object { $_ | ConvertFrom-Json } |
-        Where-Object { ([datetime]$_.timestamp).Date -eq $Date.Date })
+    # Cheap text pre-filter on the day's timestamp prefix so a year of history isn't JSON-parsed
+    # every dashboard refresh. Snapshots are written with ToString('s'), so the prefix is exact.
+    $prefix = '"timestamp":"' + $Date.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+    $snaps = @(Get-Content -LiteralPath $LogPath | Where-Object { $_.Contains($prefix) } | ForEach-Object {
+            # a line torn by a crash/power loss mid-append must not break every later report
+            try { $_ | ConvertFrom-Json -ErrorAction Stop } catch { }
+        })
     if (-not $snaps.Count) { return $null }
     [pscustomobject]@{
         Count = $snaps.Count

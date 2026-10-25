@@ -30,11 +30,18 @@ function ConvertFrom-NumstatLog {
     $commits
 }
 
+# Your commits on $Date across every local branch (+ HEAD, for detached checkouts).
+# "Yours" = $AuthorEmails if given (config author_emails), else the repo's user.email;
+# if neither is set, every author counts rather than silently showing nothing.
 function Get-DayCommits {
-    param([string]$Repo, [datetime]$Date = (Get-Date))
+    param([string]$Repo, [datetime]$Date = (Get-Date), [string[]]$AuthorEmails)
     $since = $Date.Date.ToString("yyyy-MM-ddTHH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture)
     $until = $Date.Date.AddDays(1).ToString("yyyy-MM-ddTHH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture)
-    $out = git -C $Repo log "--since=$since" "--until=$until" --pretty=format:"COMMIT|%h|%s" --numstat 2>$null
+    if (-not $AuthorEmails) { $AuthorEmails = @(git -C $Repo config user.email 2>$null) }
+    # --fixed-strings + "<email>" = exact match on the address in "Name <email>", no regex surprises
+    $authorArgs = @($AuthorEmails | Where-Object { $_ } | ForEach-Object { "--author=<$_>" })
+    if ($authorArgs) { $authorArgs += '--fixed-strings' }
+    $out = git -C $Repo log --branches HEAD @authorArgs "--since=$since" "--until=$until" --pretty=format:"COMMIT|%h|%s" --numstat 2>$null
     if (-not $out) { return @() }
     ConvertFrom-NumstatLog -Lines @($out)
 }
@@ -44,7 +51,7 @@ function Get-DayRepoCommits {
     param($Config, [datetime]$Date = (Get-Date))
     foreach ($root in $Config.git_roots) {
         foreach ($repo in Find-Repos -Root $root) {
-            $commits = @(Get-DayCommits -Repo $repo -Date $Date)
+            $commits = @(Get-DayCommits -Repo $repo -Date $Date -AuthorEmails $Config.author_emails)
             if (-not $commits.Count) { continue }
             [pscustomobject]@{
                 Path = $repo; Name = [System.IO.Path]::GetFileName($repo)

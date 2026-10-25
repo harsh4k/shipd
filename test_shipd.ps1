@@ -42,6 +42,40 @@ foreach ($dim in @(@(120, 30), @(110, 24), @(160, 45))) {
     if ($bad) { throw "frame ${W}x${H}: ragged lines (visible width != $W):`n$($bad -join "`n")" }
 }
 
+# --- snapshot log: a torn last line (crash mid-append) is skipped, other days filtered out ---
+$log = Join-Path ([IO.Path]::GetTempPath()) "shipd_snaps_$(Get-Random).jsonl"
+@(
+    '{"timestamp":"2026-07-01T10:00:00","focused":"Code","idle_seconds":1,"games_running":[]}'
+    '{"timestamp":"2026-07-02T10:00:00","focused":"Code","idle_seconds":1,"games_running":[]}'
+    '{"timestamp":"2026-07-01T10:10:00","focused":"pwsh","idle_seconds":900,"games_running":["steam"]}'
+    '{"timestamp":"2026-07-01T10:20:00","focu'
+) | Set-Content -LiteralPath $log
+$sum = Get-DaySnapSummary -Config ([pscustomobject]@{ idle_threshold_seconds = 300 }) -LogPath $log -Date ([datetime]'2026-07-01')
+Remove-Item -LiteralPath $log
+if ($sum.Count -ne 2) { throw "snap summary: expected 2 snapshots on 2026-07-01, got $($sum.Count)" }
+if ($sum.Idle -ne 1) { throw "snap summary: expected 1 idle, got $($sum.Idle)" }
+if ("$($sum.Games)" -ne 'steam') { throw "snap summary: games wrong: $($sum.Games)" }
+
+# --- day commits: only the repo owner's, from every local branch ---
+$repo = Join-Path ([IO.Path]::GetTempPath()) "shipd_git_$(Get-Random)"
+New-Item -ItemType Directory -Force $repo | Out-Null
+$gitq = { git -C $repo @args 2>&1 | Out-Null }
+& $gitq init -q -b main
+& $gitq config user.email 'me@example.com'
+& $gitq config user.name 'me'
+& $gitq commit -q --allow-empty -m 'mine on main'
+& $gitq -c user.email=other@example.com -c user.name=other commit -q --allow-empty -m 'someone else'
+& $gitq checkout -q -b feature
+& $gitq commit -q --allow-empty -m 'mine on feature'
+& $gitq checkout -q main
+$msgs = @(Get-DayCommits -Repo $repo | ForEach-Object Message)
+$msgsOverride = @(Get-DayCommits -Repo $repo -AuthorEmails @('other@example.com') | ForEach-Object Message)
+Remove-Item -LiteralPath $repo -Recurse -Force
+if (($msgs | Sort-Object) -join '; ' -ne 'mine on feature; mine on main') {
+    throw "day commits: expected only my commits from all branches, got: $($msgs -join '; ')"
+}
+if ("$msgsOverride" -ne 'someone else') { throw "day commits: author_emails override ignored, got: $($msgsOverride -join '; ')" }
+
 # --- memory breakdown sanity ---
 . (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'memory.ps1'))
 $m = Get-MemoryBreakdown

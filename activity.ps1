@@ -43,7 +43,7 @@ function Get-SystemStats {
         try {
             $sum = ((Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage').CounterSamples |
                 Measure-Object CookedValue -Sum).Sum
-            $gpu = "$([math]::Round($sum))%"
+            $gpu = "$([math]::Round([math]::Min(100, $sum)))%"   # per-engine counters can sum past 100
         } catch {}
     }
     [pscustomobject]@{
