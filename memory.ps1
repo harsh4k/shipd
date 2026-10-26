@@ -60,3 +60,31 @@ function Clear-StandbyList {
     $after = Get-MemoryBreakdown
     if ($before -and $after) { [math]::Round([math]::Max(0, $before.standby - $after.standby), 2) } else { [double]0 }
 }
+
+# Re-runs 'shipd free' elevated (one UAC prompt) and returns the GB of standby cache released.
+# Returns $null when the user declines UAC; throws when the elevated run fails.
+function Invoke-ElevatedFree {
+    param([string]$ShipdScript, $Before)
+    try {
+        # this exact pwsh, not 'pwsh' from PATH (install.ps1 supports a pwsh that isn't on PATH);
+        # the script path is quoted because -ArgumentList joins with spaces and C:\Users\Jo Smith exists
+        $child = Start-Process (Get-Process -Id $PID).Path -Verb RunAs -Wait -PassThru -WindowStyle Hidden `
+            -ArgumentList '-NoProfile', '-File', "`"$ShipdScript`"", 'free'
+    }
+    catch {
+        if (Test-UacCancelled $_.Exception) { return $null }
+        throw
+    }
+    # the elevated window is hidden, so its exit code is the only way to learn it failed
+    if ($child.ExitCode -ne 0) { throw "the elevated process exited with code $($child.ExitCode)" }
+    [math]::Round([math]::Max(0, $Before.standby - (Get-MemoryBreakdown).standby), 2)
+}
+
+# ERROR_CANCELLED (1223) anywhere in the chain = the user said no at the UAC prompt.
+function Test-UacCancelled {
+    param([Exception]$Exception)
+    for ($e = $Exception; $e; $e = $e.InnerException) {
+        if ($e -is [System.ComponentModel.Win32Exception] -and $e.NativeErrorCode -eq 1223) { return $true }
+    }
+    $false
+}

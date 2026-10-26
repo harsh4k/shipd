@@ -65,13 +65,9 @@ switch ($Command) {
             catch { Write-Output "free ram failed: $($_.Exception.Message)"; $exitCode = 1; break }
         }
         else {
-            try {
-                $child = Start-Process pwsh -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', $PSCommandPath, 'free'
-            }
-            catch { Write-Output 'cancelled (UAC declined)'; break }
-            # the elevated window is hidden, so its exit code is the only way to learn it failed
-            if ($child.ExitCode -ne 0) { Write-Output "free ram failed in the elevated process (exit $($child.ExitCode))"; $exitCode = 1; break }
-            $freed = [math]::Round([math]::Max(0, $before.standby - (Get-MemoryBreakdown).standby), 2)
+            try { $freed = Invoke-ElevatedFree -ShipdScript $PSCommandPath -Before $before }
+            catch { Write-Output "free ram failed: $($_.Exception.Message)"; $exitCode = 1; break }
+            if ($null -eq $freed) { Write-Output 'cancelled (UAC declined)'; break }
         }
         $m = Get-MemoryBreakdown
         Write-Output "freed $freed GB standby cache"

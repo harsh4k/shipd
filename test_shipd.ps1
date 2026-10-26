@@ -67,45 +67,69 @@ $gpuSamples = @(
 if ((Get-GpuUtilization $gpuSamples) -ne 55) { throw "gpu: expected 55 (30+25 on eng_0), got $(Get-GpuUtilization $gpuSamples)" }
 if ((Get-GpuUtilization @((& $s 'pid_1_e' 80), (& $s 'pid_2_e' 70))) -ne 100) { throw 'gpu: expected cap at 100' }
 
-# --- day commits: only the repo owner's (any case), every local branch, worktrees counted once ---
+# --- day commits: mine only (any case), every branch + detached HEAD, orphan-safe, worktrees once ---
 $root = Join-Path ([IO.Path]::GetTempPath()) "shipd_git_$(Get-Random)"
-$repo = Join-Path $root 'app'
+$repo = Join-Path $root 'zapp'          # main checkout sorts AFTER its worktree on purpose
+$wt = Join-Path $root 'a-wt'
 New-Item -ItemType Directory -Force $repo | Out-Null
 $day = [datetime]'2026-07-01'
-$env:GIT_AUTHOR_DATE = $env:GIT_COMMITTER_DATE = '2026-07-01T12:00:00'   # fixed day: no midnight flake
+$savedEnv = @{}
+foreach ($v in 'GIT_AUTHOR_DATE', 'GIT_COMMITTER_DATE', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM') { $savedEnv[$v] = [Environment]::GetEnvironmentVariable($v) }
+$emptyCfg = Join-Path $root 'empty.gitconfig'
+# fixed day (no midnight flake) and no global/system config (a dev's signing, hooks or email can't leak in)
+$env:GIT_AUTHOR_DATE = $env:GIT_COMMITTER_DATE = '2026-07-01T12:00:00'
+$env:GIT_CONFIG_NOSYSTEM = '1'
 function Invoke-TestGit {
-    # signing/hooks off so a developer's global git config can't break the fixture; failures are shown
-    $o = git -c commit.gpgsign=false -c core.hooksPath= -C $repo @args 2>&1
+    param([string]$Dir)
+    $o = git -C $Dir @args 2>&1
     if ($LASTEXITCODE) { throw "git $($args -join ' ') failed: $o" }
 }
 try {
-    Invoke-TestGit init -q -b main
-    Invoke-TestGit config user.email 'me@example.com'
-    Invoke-TestGit config user.name 'me'
-    Invoke-TestGit commit -q --allow-empty -m 'mine on main'
-    Invoke-TestGit -c user.email=Me@Example.COM commit -q --allow-empty -m 'mine, other case'
-    Invoke-TestGit -c user.email=other@example.com -c user.name=other commit -q --allow-empty -m 'someone else'
-    Invoke-TestGit checkout -q -b feature
-    Invoke-TestGit commit -q --allow-empty -m 'mine on feature'
-    Invoke-TestGit worktree add -q (Join-Path $root 'app-wt') main
-    Invoke-TestGit checkout -q --orphan fresh   # unborn HEAD must not hide the other branches
+    New-Item -ItemType File -Force -Path $emptyCfg | Out-Null
+    $env:GIT_CONFIG_GLOBAL = $emptyCfg
+    Invoke-TestGit $repo init -q -b main
+    Invoke-TestGit $repo config user.email 'me@example.com'
+    Invoke-TestGit $repo config user.name 'me'
+    Invoke-TestGit $repo commit -q --allow-empty -m 'mine on main'
+    Invoke-TestGit $repo -c user.email=Me@Example.COM commit -q --allow-empty -m 'mine, other case'
+    Invoke-TestGit $repo -c user.email=other@example.com -c user.name=other commit -q --allow-empty -m 'someone else'
+    Invoke-TestGit $repo checkout -q -b feature
+    Invoke-TestGit $repo commit -q --allow-empty -m 'mine on feature'
+    Invoke-TestGit $repo worktree add -q --detach $wt main
+    Invoke-TestGit $wt commit -q --allow-empty -m 'mine detached'
+    Invoke-TestGit $repo checkout -q --orphan fresh   # unborn HEAD must not hide the other branches
     $msgs = @(Get-DayCommits -Repo $repo -Date $day | ForEach-Object Message)
+    $msgsWt = @(Get-DayCommits -Repo $wt -Date $day | ForEach-Object Message)
     $msgsOverride = @(Get-DayCommits -Repo $repo -Date $day -AuthorEmails @('other@example.com') | ForEach-Object Message)
     $repos = @(Get-DayRepoCommits -Config ([pscustomobject]@{ git_roots = @($root) }) -Date $day)
+    Invoke-TestGit $wt config --unset user.email   # no identity anywhere: HEAD only, every author
+    $msgsNoEmail = @(Get-DayCommits -Repo $wt -Date $day | ForEach-Object Message)
 }
 finally {
-    Remove-Item Env:GIT_AUTHOR_DATE, Env:GIT_COMMITTER_DATE
+    foreach ($v in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($v, $savedEnv[$v]) }
     Remove-Item -LiteralPath $root -Recurse -Force
 }
 if (($msgs | Sort-Object) -join '; ' -ne 'mine on feature; mine on main; mine, other case') {
     throw "day commits: expected only my commits from all branches, got: $($msgs -join '; ')"
 }
+if ($msgsWt -notcontains 'mine detached') { throw "day commits: detached HEAD commit missing, got: $($msgsWt -join '; ')" }
 if ("$msgsOverride" -ne 'someone else') { throw "day commits: author_emails override ignored, got: $($msgsOverride -join '; ')" }
+if (($msgsNoEmail | Sort-Object) -join '; ' -ne 'mine detached; mine on main; mine, other case; someone else') {
+    throw "day commits: no-email fallback should be HEAD only, every author; got: $($msgsNoEmail -join '; ')"
+}
+$main = $repos | Where-Object Name -eq 'zapp'
 $total = ($repos | ForEach-Object { $_.Commits.Count } | Measure-Object -Sum).Sum
-if ($total -ne 3) { throw "day repo commits: worktree double-counted, expected 3 commits total, got $total across $($repos.Count) repos" }
+if ($total -ne 4 -or $main.Commits.Count -ne 3) {
+    throw "day repo commits: expected 4 commits, 3 credited to the main checkout; got $total total, $($main.Commits.Count) on zapp"
+}
+
+# --- UAC cancel (ERROR_CANCELLED, possibly wrapped) vs a real failure ---
+. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'memory.ps1'))
+$cancel = [InvalidOperationException]::new('wrapped', [ComponentModel.Win32Exception]::new(1223))
+if (-not (Test-UacCancelled $cancel)) { throw 'uac: wrapped ERROR_CANCELLED not detected' }
+if (Test-UacCancelled ([ComponentModel.Win32Exception]::new(2))) { throw 'uac: file-not-found treated as a cancel' }
 
 # --- memory breakdown sanity ---
-. (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'memory.ps1'))
 $m = Get-MemoryBreakdown
 if ($null -ne $m) {
     foreach ($p in 'total', 'in_use', 'standby', 'modified', 'free') {

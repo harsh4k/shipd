@@ -62,7 +62,10 @@ if (-not $hadConfig) {
 $ps5profile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\profile.ps1'
 if (-not (Test-Path -LiteralPath $ps5profile)) { New-Item -ItemType File -Force $ps5profile | Out-Null }
 if ("$(Get-Content -LiteralPath $ps5profile -Raw)" -notmatch 'function shipd') {   # "$()": empty file gives $null, and $null -notmatch returns @() (falsy)
-    Add-Content -LiteralPath $ps5profile "`nfunction shipd { & `"$pwsh`" -NoProfile -File `"$dest\shipd.ps1`" @args }"
+    # single-quoted + escaped: a $ or backtick in a Windows username must not be expanded at call time
+    $qPwsh = [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($pwsh)
+    $qScript = [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent("$dest\shipd.ps1")
+    Add-Content -LiteralPath $ps5profile "`nfunction shipd { & '$qPwsh' -NoProfile -File '$qScript' @args }"
 }
 
 # ── 6. add %LOCALAPPDATA%\shipd to User PATH if not present ──
