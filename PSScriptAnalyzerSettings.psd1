@@ -7,11 +7,8 @@
         'PSAvoidUsingWriteHost'
         # Get-DayCommits, Get-SystemStats, Find-Repos... read better plural; renaming is churn.
         'PSUseSingularNouns'
-        # Best-effort probes (GPU counter, PATH broadcast, torn JSON line) deliberately ignore failure.
-        'PSAvoidUsingEmptyCatchBlock'
-        # pwsh 7 reads BOM-less UTF-8; install.ps1 is fetched as a string by irm, not read from disk.
+        # shipd runs on pwsh 7, which reads BOM-less UTF-8. install.ps1 (also run by 5.1) is kept
+        # pure ASCII instead, and CI enforces that.
         'PSUseBOMForUnicodeEncodedFile'
-        # New-Panel builds strings; "New-" here doesn't change system state.
-        'PSUseShouldProcessForStateChangingFunctions'
     )
 }

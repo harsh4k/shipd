@@ -49,9 +49,11 @@ Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1
 
 The tests run under pwsh on Linux/macOS too. Anything that touches Win32, Task Scheduler or perf
 counters only works on Windows, so verify it on a Windows machine or in the Windows CI job
-(`.github/workflows/ci.yml`: lint + 5.1 syntax check on Ubuntu; tests on Windows and Ubuntu; a
-Windows smoke run of `snapshot`, `report` and `mem`). A new lint exclusion goes in
-`PSScriptAnalyzerSettings.psd1` with a one-line reason.
+(`.github/workflows/ci.yml`: lint, an ASCII check and a 5.1 parse of `install.ps1` on Windows;
+tests on Windows and Ubuntu; a Windows smoke run of `snapshot`, `report` and `mem`). Prefer a
+`SuppressMessageAttribute` at the one site over a repo-wide exclusion; a new exclusion in
+`PSScriptAnalyzerSettings.psd1` needs a one-line reason.
+- `install.ps1` stays **pure ASCII** (5.1 reads BOM-less files as ANSI; CI enforces it).
 
 ## Conventions
 
@@ -91,7 +93,8 @@ must be opt-in and documented in the README's Privacy section.
 
 1. ~~Repo hygiene~~ done: agent scratch files removed, MIT LICENSE.
 2. ~~Correctness~~ done: torn snapshot lines, your commits only, all branches, `-LiteralPath`, `free` failures.
-3. ~~CI~~ done: GitHub Actions lint, tests on Windows + Ubuntu, Windows smoke run.
+3. ~~CI~~ done: GitHub Actions lint, tests on Windows + Ubuntu, Windows smoke run. Running
+   `install.ps1` end to end under 5.1 in CI comes with step 4 (it needs a local-source option).
 4. Install lifecycle: `shipd uninstall`, versioned installs from release tags, fix the CMD
    refresh helper.
 5. Dashboard polish: responsive panel widths, live CPU % instead of cumulative CPU seconds, a

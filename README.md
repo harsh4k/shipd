@@ -115,9 +115,9 @@ Snapshots record your focused app, idle time, and the names of running processes
 Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1   # lint
 ```
 
-CI runs both on every push and pull request. Tests run on Windows and Linux, and the Windows job also
-smoke-tests `snapshot`, `report` and `mem` for real and checks that `install.ps1` still parses in
-Windows PowerShell 5.1.
+CI runs both on every pull request and every push to `master`. Tests run on Windows and Linux. The
+Windows jobs also run `snapshot`, `report` and `mem` for real against a commit made in CI, and check
+that `install.ps1` is pure ASCII and still parses in Windows PowerShell 5.1.
 
 ## License
 
