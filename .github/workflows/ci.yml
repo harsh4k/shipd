@@ -14,7 +14,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install PSScriptAnalyzer
         shell: pwsh
         run: Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Scope CurrentUser -Force
@@ -47,7 +47,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Tests
         shell: pwsh
         run: ./test_shipd.ps1
