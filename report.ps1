@@ -1,13 +1,36 @@
 # Report data + rendering. Terminal dashboard uses $PSStyle (pwsh 7 built-in, no deps);
 # the saved reports\<date>.txt stays plain text.
 
+# Append one snapshot as a JSON line. A torn previous append leaves no trailing newline;
+# start on a fresh line so this record isn't glued onto the fragment and lost with it.
+function Add-SnapshotLine {
+    param([string]$LogPath, $Snapshot)
+    $line = $Snapshot | ConvertTo-Json -Compress
+    if ((Test-Path -LiteralPath $LogPath) -and (Get-Item -LiteralPath $LogPath).Length -gt 0) {
+        $fs = [System.IO.FileStream]::new($LogPath, 'Open', 'Read', 'ReadWrite')
+        try { [void]$fs.Seek(-1, 'End'); $last = $fs.ReadByte() } finally { $fs.Dispose() }
+        if ($last -ne 10) { $line = [Environment]::NewLine + $line }
+    }
+    Add-Content -LiteralPath $LogPath -Value $line
+}
+
 # One day of snapshots, summarized. Shared by the daily report and the live dashboard.
 function Get-DaySnapSummary {
     param($Config, [string]$LogPath, [datetime]$Date = (Get-Date))
     if (-not (Test-Path -LiteralPath $LogPath)) { return $null }
-    # [datetime] cast: ConvertFrom-Json may give a DateTime or a string depending on PS version
-    $snaps = @(Get-Content -LiteralPath $LogPath | ForEach-Object { $_ | ConvertFrom-Json } |
-        Where-Object { ([datetime]$_.timestamp).Date -eq $Date.Date })
+    # Cheap text pre-filter on the day's timestamp prefix so a year of history isn't JSON-parsed
+    # every dashboard refresh. Snapshots are written with ToString('s'), so the prefix is exact.
+    $prefix = '"timestamp":"' + $Date.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+    # FileShare.ReadWrite: the snapshot task may be appending right now (Get-Content shared too)
+    $reader = [System.IO.StreamReader]::new([System.IO.FileStream]::new($LogPath, 'Open', 'Read', 'ReadWrite'))
+    try {
+        $snaps = @(while ($null -ne ($line = $reader.ReadLine())) {
+                if (-not $line.Contains($prefix)) { continue }
+                # a line torn by a crash/power loss mid-append must not break every later report
+                try { $line | ConvertFrom-Json -ErrorAction Stop } catch { }
+            })
+    }
+    finally { $reader.Dispose() }
     if (-not $snaps.Count) { return $null }
     [pscustomobject]@{
         Count = $snaps.Count

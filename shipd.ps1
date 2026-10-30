@@ -16,6 +16,7 @@ $config = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'config.json') -Raw 
 . (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'dashboard.ps1'))
 $logPath = Join-Path $PSScriptRoot 'snapshots.jsonl'
 $reportsDir = Join-Path $PSScriptRoot 'reports'
+$exitCode = 0  # set non-zero by commands that fail; git probes' $LASTEXITCODE is deliberately ignored
 
 switch ($Command) {
 
@@ -25,7 +26,7 @@ switch ($Command) {
 
     'snapshot' {
         $snap = Get-ActivitySnapshot $config
-        ($snap | ConvertTo-Json -Compress) | Add-Content -LiteralPath $logPath
+        Add-SnapshotLine -LogPath $logPath -Snapshot $snap
         Write-Output "snapshot saved: focused=$($snap.focused) idle=$($snap.idle_seconds)s games=$($snap.games_running -join ',')"
     }
 
@@ -39,9 +40,11 @@ switch ($Command) {
     'install' {
         # CurrentUserAllHosts so it works in Windows Terminal AND the VS Code terminal
         $profilePath = $PROFILE.CurrentUserAllHosts
-        if (-not (Test-Path $profilePath)) { New-Item -ItemType File -Force $profilePath | Out-Null }
-        if ("$(Get-Content $profilePath -Raw)" -notmatch 'function shipd') {   # "$()": empty file gives $null, and $null -notmatch returns @() (falsy)
-            Add-Content $profilePath "`nfunction shipd { & '$PSCommandPath' @args }"
+        if (-not (Test-Path -LiteralPath $profilePath)) { New-Item -ItemType File -Force -Path $profilePath | Out-Null }
+        if ("$(Get-Content -LiteralPath $profilePath -Raw)" -notmatch 'function shipd') {   # "$()": empty file gives $null, and $null -notmatch returns @() (falsy)
+            # escapes every quote PowerShell accepts as a delimiter, typographic ones included
+            $quoted = [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($PSCommandPath)
+            Add-Content -LiteralPath $profilePath "`nfunction shipd { & '$quoted' @args }"
         }
         Write-Output "installed: open a NEW terminal, then run 'shipd report' from any folder"
     }
@@ -58,14 +61,13 @@ switch ($Command) {
         $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
             ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
         if ($admin) {
-            $freed = Clear-StandbyList
+            try { $freed = Clear-StandbyList }
+            catch { Write-Output "free ram failed: $($_.Exception.Message)"; $exitCode = 1; break }
         }
         else {
-            try {
-                Start-Process pwsh -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', $PSCommandPath, 'free'
-            }
-            catch { Write-Output 'cancelled (UAC declined)'; break }
-            $freed = [math]::Round([math]::Max(0, $before.standby - (Get-MemoryBreakdown).standby), 2)
+            try { $freed = Invoke-ElevatedFree -ShipdScript $PSCommandPath -Before $before }
+            catch { Write-Output "free ram failed: $($_.Exception.Message)"; $exitCode = 1; break }
+            if ($null -eq $freed) { Write-Output 'cancelled (UAC declined)'; break }
         }
         $m = Get-MemoryBreakdown
         Write-Output "freed $freed GB standby cache"
@@ -107,4 +109,4 @@ switch ($Command) {
         Write-Output 'shipd scheduled tasks removed'
     }
 }
-exit 0  # don't leak $LASTEXITCODE from git probes on odd repos
+exit $exitCode  # never $LASTEXITCODE: git probes on odd repos set it without anything being wrong

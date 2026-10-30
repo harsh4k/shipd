@@ -80,6 +80,7 @@ re-reads it from disk. Needs one UAC click; declining it simply cancels.
 | Key | Meaning | Default |
 |---|---|---|
 | `git_roots` | Folders scanned (recursively) for git repos with commits today | `["X:\\Projects"]` |
+| `author_emails` | *(optional)* Which commits count as yours. Commits from every local branch are counted | each repo's `git config user.email` |
 | `known_games` | Process names counted as gaming in the report | steam, valorant, cs2, … |
 | `idle_threshold_seconds` | A snapshot counts as "idle" past this much inactivity | `300` |
 | `snapshot_interval_minutes` | How often background snapshots run | `10` |
@@ -101,7 +102,7 @@ Snapshots record your focused app, idle time, and the names of running processes
 
 - **"running scripts is disabled"** → `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 - **`shipd` not recognized** → run `install.ps1` to configure PowerShell profiles and the CMD path wrapper, then open a new terminal
-- **Report shows no commits** → check `git_roots` in `config.json` actually contains your repos
+- **Report shows no commits** → check `git_roots` in `config.json` actually contains your repos, and that the repo's `user.email` (or `author_emails`) matches the email on your commits
 - **No snapshots appearing** → `Get-ScheduledTask 'shipd snapshot'` should show *Ready*; if missing, run `shipd schedule`
 
 ## Tests

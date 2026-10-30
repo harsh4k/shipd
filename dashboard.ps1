@@ -181,11 +181,10 @@ function Show-LiveDashboard {
                     if ($k.KeyChar -in 'g', 'G') { $gitLines = Get-GitPanelLines $Config }
                     if ($k.KeyChar -in 'f', 'F' -and $mem) {
                         try {
-                            Start-Process pwsh -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', "$PSScriptRoot\shipd.ps1", 'free'
-                            $freed = [math]::Round([math]::Max(0, $mem.standby - (Get-MemoryBreakdown).standby), 2)
-                            $memMsg = "✓ freed $freed GB"
+                            $freed = Invoke-ElevatedFree -ShipdScript (Join-Path $PSScriptRoot 'shipd.ps1') -Before $mem
+                            $memMsg = if ($null -eq $freed) { 'free ram cancelled' } else { "✓ freed $freed GB" }
                         }
-                        catch { $memMsg = 'free ram cancelled' }   # UAC declined — not an error
+                        catch { $memMsg = 'free ram failed' }
                         $memMsgTicks = 5
                     }
                 }

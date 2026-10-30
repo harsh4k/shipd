@@ -59,8 +59,11 @@ machine or in the Windows CI job.
 - **Format dates for git with `InvariantCulture`.** Some locales use `.` as the time separator, and
   git silently returns nothing for those strings.
 - Background tasks never elevate and never touch memory. `free` is manual only (CLI or `f` key).
-- Every reader of `snapshots.jsonl` must tolerate a torn or corrupt line and skip it. A crash
-  mid-append must never break the report.
+- Every reader of `snapshots.jsonl` must tolerate a torn or corrupt line and skip it, and every
+  write goes through `Add-SnapshotLine`, which starts a fresh line after a torn one. A crash
+  mid-append must never break the report or swallow the next snapshot.
+- Elevation goes through `Invoke-ElevatedFree` (memory.ps1). Only ERROR_CANCELLED counts as
+  "user declined"; any other failure is reported as a failure.
 - The saved report stays plain text. Colors are for the terminal only.
 - Dashboard frame lines must be exactly `W` visible characters wide. The geometry test enforces this.
 - Match the existing style: small focused functions, comments that explain *why*, no new modules or
@@ -85,8 +88,7 @@ must be opt-in and documented in the README's Privacy section.
 ## Roadmap
 
 1. Repo hygiene: remove the committed agent scratch files, add a LICENSE.
-2. Correctness: tolerate corrupt snapshot lines, count only the user's own commits, include all
-   local branches, finish the `-LiteralPath` sweep, surface `free` failures.
+2. ~~Correctness~~ done: torn snapshot lines, your commits only, all branches, `-LiteralPath`, `free` failures.
 3. CI: a GitHub Actions Windows job running PSScriptAnalyzer and the tests.
 4. Install lifecycle: `shipd uninstall`, versioned installs from release tags, fix the CMD
    refresh helper.

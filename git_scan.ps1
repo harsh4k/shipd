@@ -30,11 +30,25 @@ function ConvertFrom-NumstatLog {
     $commits
 }
 
+# Your commits on $Date across every local branch plus HEAD (detached checkouts, rebases).
+# "Yours" = $AuthorEmails if given (config author_emails), else the repo's user.email.
+# If neither is set, every author on HEAD counts (the pre-filter behavior): walking every
+# branch without an author would pull teammates' checked-out branches into your report.
 function Get-DayCommits {
-    param([string]$Repo, [datetime]$Date = (Get-Date))
+    param([string]$Repo, [datetime]$Date = (Get-Date), [string[]]$AuthorEmails)
     $since = $Date.Date.ToString("yyyy-MM-ddTHH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture)
     $until = $Date.Date.AddDays(1).ToString("yyyy-MM-ddTHH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture)
-    $out = git -C $Repo log "--since=$since" "--until=$until" --pretty=format:"COMMIT|%h|%s" --numstat 2>$null
+    # per repo, not once globally: includeIf lets work and personal folders use different emails
+    if (-not $AuthorEmails) { $AuthorEmails = @(git -C $Repo config user.email 2>$null) }
+    # "<email>" + fixed-strings = exact address match inside "Name <email>"; emails are case-insensitive
+    $authorArgs = @($AuthorEmails | Where-Object { $_ } | ForEach-Object { "--author=<$_>" })
+    if ($authorArgs) { $authorArgs += '--fixed-strings', '--regexp-ignore-case' }
+    # trailing -- so a file named HEAD can't be mistaken for the revision
+    $logArgs = $authorArgs + "--since=$since", "--until=$until", '--pretty=format:COMMIT|%h|%s', '--numstat', '--'
+    $revs = @('HEAD'); if ($authorArgs) { $revs = @('--branches', 'HEAD') }
+    $out = git -C $Repo log @revs @logArgs 2>$null
+    # HEAD is fatal on an unborn/orphan branch; the other branches still count
+    if ($LASTEXITCODE -and $authorArgs) { $out = git -C $Repo log --branches @logArgs 2>$null }
     if (-not $out) { return @() }
     ConvertFrom-NumstatLog -Lines @($out)
 }
@@ -42,14 +56,19 @@ function Get-DayCommits {
 # Every repo under the config roots with commits on $Date, plus per-repo totals.
 function Get-DayRepoCommits {
     param($Config, [datetime]$Date = (Get-Date))
-    foreach ($root in $Config.git_roots) {
-        foreach ($repo in Find-Repos -Root $root) {
-            $commits = @(Get-DayCommits -Repo $repo -Date $Date)
-            if (-not $commits.Count) { continue }
-            [pscustomobject]@{
-                Path = $repo; Name = [System.IO.Path]::GetFileName($repo)
-                Commits = $commits; NetLines = ($commits | Measure-Object NetLines -Sum).Sum
-            }
+    # Linked worktrees share their main checkout's branches, so count each commit once.
+    # Repos whose .git is a real folder go first, so the main checkout gets the credit
+    # rather than whichever worktree happens to sort earlier.
+    $repos = @(foreach ($root in $Config.git_roots) { Find-Repos -Root $root }) |
+        Sort-Object -Stable { -not (Test-Path -LiteralPath (Join-Path $_ '.git') -PathType Container) }
+    $seen = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($repo in $repos) {
+        $commits = @(Get-DayCommits -Repo $repo -Date $Date -AuthorEmails $Config.author_emails |
+            Where-Object { $seen.Add($_.Hash) })
+        if (-not $commits.Count) { continue }
+        [pscustomobject]@{
+            Path = $repo; Name = [System.IO.Path]::GetFileName($repo)
+            Commits = $commits; NetLines = ($commits | Measure-Object NetLines -Sum).Sum
         }
     }
 }
