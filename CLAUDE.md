@@ -41,15 +41,19 @@ config.json     Shipped defaults. The installer rewrites git_roots on a fresh in
 
 ```powershell
 pwsh -NoProfile -File .\test_shipd.ps1      # tests; prints "all checks passed"
-Invoke-ScriptAnalyzer -Path . -Recurse      # lint (PSScriptAnalyzer)
+Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1   # lint, must be clean
 .\shipd.ps1                                 # live dashboard (needs a 110x24 window)
 .\shipd.ps1 report                          # today's report
 .\shipd.ps1 snapshot                        # one snapshot
 ```
 
-The parser, repo-scan and frame-geometry tests also run under pwsh on Linux/macOS. Anything that
-touches Win32, Task Scheduler or perf counters only works on Windows, so verify those on a Windows
-machine or in the Windows CI job.
+The tests run under pwsh on Linux/macOS too. Anything that touches Win32, Task Scheduler or perf
+counters only works on Windows, so verify it on a Windows machine or in the Windows CI job
+(`.github/workflows/ci.yml`: lint, an ASCII check and a 5.1 parse of `install.ps1` on Windows;
+tests on Windows and Ubuntu; a Windows smoke run of `snapshot`, `report` and `mem`). Prefer a
+`SuppressMessageAttribute` at the one site over a repo-wide exclusion; a new exclusion in
+`PSScriptAnalyzerSettings.psd1` needs a one-line reason.
+- `install.ps1` stays **pure ASCII** (5.1 reads BOM-less files as ANSI; CI enforces it).
 
 ## Conventions
 
@@ -87,9 +91,10 @@ must be opt-in and documented in the README's Privacy section.
 
 ## Roadmap
 
-1. Repo hygiene: remove the committed agent scratch files, add a LICENSE.
+1. ~~Repo hygiene~~ done: agent scratch files removed, MIT LICENSE.
 2. ~~Correctness~~ done: torn snapshot lines, your commits only, all branches, `-LiteralPath`, `free` failures.
-3. CI: a GitHub Actions Windows job running PSScriptAnalyzer and the tests.
+3. ~~CI~~ done: GitHub Actions lint, tests on Windows + Ubuntu, Windows smoke run. Running
+   `install.ps1` end to end under 5.1 in CI comes with step 4 (it needs a local-source option).
 4. Install lifecycle: `shipd uninstall`, versioned installs from release tags, fix the CMD
    refresh helper.
 5. Dashboard polish: responsive panel widths, live CPU % instead of cumulative CPU seconds, a
