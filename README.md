@@ -1,5 +1,8 @@
 # shipd
 
+[![CI](https://github.com/harsh4k/shipd/actions/workflows/ci.yml/badge.svg)](https://github.com/harsh4k/shipd/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A daily dev + activity report for Windows, written in pure PowerShell. No dependencies, no accounts, no telemetry — all data stays in this folder. Works seamlessly in both PowerShell and Command Prompt (`cmd.exe`).
 
 Every 10 minutes it takes a silent snapshot of what you're doing (focused app, idle time, running games). Every evening it builds a report combining that with your git commits across all your projects, plus system stats.
@@ -108,5 +111,14 @@ Snapshots record your focused app, idle time, and the names of running processes
 ## Tests
 
 ```powershell
-.\test_shipd.ps1
+.\test_shipd.ps1                                                     # prints "all checks passed"
+Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1   # lint
 ```
+
+CI runs both on every push and pull request. Tests run on Windows and Linux, and the Windows job also
+smoke-tests `snapshot`, `report` and `mem` for real and checks that `install.ps1` still parses in
+Windows PowerShell 5.1.
+
+## License
+
+[MIT](LICENSE)

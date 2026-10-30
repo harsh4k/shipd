@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Scope CurrentUser -Force
+      - name: Lint
+        shell: pwsh
+        run: |
+          $findings = @(Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1)
+          $findings | Format-Table RuleName, ScriptName, Line, Message -Wrap -AutoSize
+          if ($findings) { throw "$($findings.Count) PSScriptAnalyzer finding(s)" }
+      - name: install.ps1 stays Windows PowerShell 5.1 compatible
+        shell: pwsh
+        run: |
+          $rules = @{
+            IncludeRules = @('PSUseCompatibleSyntax')
+            Rules = @{ PSUseCompatibleSyntax = @{ Enable = $true; TargetVersions = @('5.1') } }
+          }
+          $findings = @(Invoke-ScriptAnalyzer -Path ./install.ps1 -Settings $rules)
+          $findings | Format-Table Line, Message -Wrap -AutoSize
+          if ($findings) { throw "install.ps1 uses syntax Windows PowerShell 5.1 can't run" }
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests
+        shell: pwsh
+        run: ./test_shipd.ps1
+
+      # Everything below needs real Windows: Win32 P/Invoke, CIM, perf counters.
+      - name: Windows PowerShell 5.1 parses install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $errs = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$PWD\install.ps1", [ref]$null, [ref]$errs)
+          if ($errs) { $errs | Format-List; throw 'install.ps1 does not parse in Windows PowerShell 5.1' }
+      - name: Smoke - snapshot, report, mem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./shipd.ps1 snapshot
+          if ($LASTEXITCODE) { throw "snapshot exited $LASTEXITCODE" }
+          $snap = Get-Content -LiteralPath ./snapshots.jsonl -Tail 1 | ConvertFrom-Json
+          if ($null -eq $snap.idle_seconds) { throw 'snapshot line has no idle_seconds' }
+
+          ./shipd.ps1 report
+          if ($LASTEXITCODE) { throw "report exited $LASTEXITCODE" }
+          $day = (Get-Date).ToString('yyyy-MM-dd')
+          $text = Get-Content -LiteralPath "./reports/$day.txt" -Raw
+          foreach ($section in 'SYSTEM', 'GIT', 'ACTIVITY') {
+            if ($text -notmatch "(?m)^$section") { throw "report is missing its $section section" }
+          }
+
+          $mem = ./shipd.ps1 mem
+          $mem
+          if ("$mem" -notmatch 'standby cache') { throw "mem output unexpected: $mem" }
