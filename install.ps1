@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-# ── 1. shipd itself needs PowerShell 7 ($PSStyle) ──
+# -- 1. shipd itself needs PowerShell 7 ($PSStyle) --
 $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 if ($pwsh) { $pwsh = $pwsh.Source }
 else {
@@ -19,7 +19,7 @@ else {
     }
 }
 
-# ── 2. download + extract to %LOCALAPPDATA%\shipd ──
+# -- 2. download + extract to %LOCALAPPDATA%\shipd --
 $dest = Join-Path $env:LOCALAPPDATA 'shipd'
 $tmp = Join-Path $env:TEMP "shipd_install_$(Get-Random)"
 New-Item -ItemType Directory -Force $tmp | Out-Null
@@ -32,7 +32,7 @@ Get-ChildItem -LiteralPath "$tmp\shipd-master" | Where-Object { -not ($hadConfig
     Copy-Item -Destination $dest -Recurse -Force
 Remove-Item -LiteralPath $tmp -Recurse -Force
 
-# ── 2b. Generate CMD wrapper ──
+# -- 2b. Generate CMD wrapper --
 $cmdContent = @"
 @echo off
 `"$pwsh`" -NoProfile -File "%LOCALAPPDATA%\shipd\shipd.ps1" %*
@@ -42,7 +42,7 @@ Set-Content -LiteralPath $cmdPath -Value $cmdContent -Force
 
 Get-ChildItem -LiteralPath $dest -Recurse -File | Unblock-File   # drop mark-of-the-web so RemoteSigned policy runs it
 
-# ── 3. fresh install: point the GIT panel at their projects ──
+# -- 3. fresh install: point the GIT panel at their projects --
 if (-not $hadConfig) {
     $default = Join-Path $HOME 'Projects'
     if (-not (Test-Path -LiteralPath $default)) { $default = $HOME }
@@ -54,11 +54,11 @@ if (-not $hadConfig) {
     $cfg | ConvertTo-Json | Set-Content -LiteralPath "$dest\config.json"
 }
 
-# ── 4. 'shipd' command (pwsh profile) + background tasks ──
+# -- 4. 'shipd' command (pwsh profile) + background tasks --
 & $pwsh -NoProfile -File "$dest\shipd.ps1" install
 & $pwsh -NoProfile -File "$dest\shipd.ps1" schedule
 
-# ── 5. make 'shipd' work from Windows PowerShell 5.1 windows too ──
+# -- 5. make 'shipd' work from Windows PowerShell 5.1 windows too --
 $ps5profile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\profile.ps1'
 if (-not (Test-Path -LiteralPath $ps5profile)) { New-Item -ItemType File -Force $ps5profile | Out-Null }
 if ("$(Get-Content -LiteralPath $ps5profile -Raw)" -notmatch 'function shipd') {   # "$()": empty file gives $null, and $null -notmatch returns @() (falsy)
@@ -68,7 +68,7 @@ if ("$(Get-Content -LiteralPath $ps5profile -Raw)" -notmatch 'function shipd') {
     Add-Content -LiteralPath $ps5profile "`nfunction shipd { & '$qPwsh' -NoProfile -File '$qScript' @args }"
 }
 
-# ── 6. add %LOCALAPPDATA%\shipd to User PATH if not present ──
+# -- 6. add %LOCALAPPDATA%\shipd to User PATH if not present --
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $pathEntries = @()
 if ($userPath) {
@@ -82,7 +82,7 @@ foreach ($entry in $pathEntries) {
             $found = $true
             break
         }
-    } catch {}
+    } catch { Write-Verbose "unexpandable PATH entry: $entry" }
 }
 if (-not $found) {
     $newPath = ($pathEntries + '%LOCALAPPDATA%\shipd') -join ';'
@@ -97,7 +97,7 @@ if (-not $found) {
             $result = [IntPtr]::Zero
             [void]$win32::SendMessageTimeout([IntPtr]0xffff, 0x001A, [IntPtr]::Zero, "Environment", 2, 5000, [ref]$result)
         }
-    } catch {}
+    } catch { Write-Verbose "PATH change broadcast failed (new terminals may need a re-login): $_" }
 }
 
 # Update current process PATH
@@ -110,7 +110,7 @@ foreach ($entry in $processPathEntries) {
             $foundProcess = $true
             break
         }
-    } catch {}
+    } catch { Write-Verbose "unexpandable PATH entry: $entry" }
 }
 if (-not $foundProcess) {
     $newProcessPath = ($processPathEntries + $dest) -join ';'
@@ -119,7 +119,7 @@ if (-not $foundProcess) {
 }
 
 Write-Host ''
-# ── 7. helper for CMD that is already open ──
+# -- 7. helper for CMD that is already open --
 $batPath = Join-Path $dest 'refresh_shipd_path.bat'
 $batContent = '@echo off && set "PATH=%PATH%;%LOCALAPPDATA%\\shipd" && echo PATH refreshed for this CMD session'
 Set-Content -LiteralPath $batPath -Value $batContent -Encoding ASCII -Force

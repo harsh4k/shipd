@@ -51,7 +51,7 @@ function Get-SystemStats {
         # works for any GPU vendor on Win10+; counter name is localized, so try/catch
         try {
             $gpu = "$(Get-GpuUtilization (Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage').CounterSamples)%"
-        } catch {}
+        } catch { Write-Verbose "GPU engine counters unavailable: $_" }
     }
     [pscustomobject]@{
         cpu       = [math]::Round($cpu)

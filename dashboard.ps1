@@ -41,6 +41,7 @@ function Get-Sparkline {
 function Get-VisLen([string]$s) { ($s -replace "`e\[[0-9;]*m", '').Length }
 
 function New-Panel {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'builds strings; changes no system state')]
     param([string]$Title, [string[]]$Body, [int]$Width, [int]$Height)
     $iw = $Width - 2
     $out = @("$($TH.D)┌─ $($TH.B)$Title$($TH.D) $('─' * [math]::Max(0, $iw - $Title.Length - 3))┐$($TH.R)")

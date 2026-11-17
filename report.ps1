@@ -27,7 +27,7 @@ function Get-DaySnapSummary {
         $snaps = @(while ($null -ne ($line = $reader.ReadLine())) {
                 if (-not $line.Contains($prefix)) { continue }
                 # a line torn by a crash/power loss mid-append must not break every later report
-                try { $line | ConvertFrom-Json -ErrorAction Stop } catch { }
+                try { $line | ConvertFrom-Json -ErrorAction Stop } catch { Write-Verbose "skipped unreadable snapshot line: $line" }
             })
     }
     finally { $reader.Dispose() }

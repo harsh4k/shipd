@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    # Windows, not Ubuntu: alias rules (sort, ls, sleep...) only fire where those aliases exist.
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Scope CurrentUser -Force
+      - name: Lint
+        shell: pwsh
+        run: |
+          # explicit import: the runner image ships its own PSScriptAnalyzer, which may differ
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0
+          $findings = @(Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1)
+          $findings | Format-Table RuleName, ScriptName, Line, Message -Wrap -AutoSize
+          if ($findings) { throw "$($findings.Count) PSScriptAnalyzer finding(s)" }
+      - name: install.ps1 is pure ASCII
+        shell: pwsh
+        # Windows PowerShell 5.1 reads a BOM-less file as ANSI, so one em-dash in a string breaks it
+        run: |
+          $bad = Select-String -LiteralPath ./install.ps1 -Pattern '[^\x00-\x7F]' -AllMatches
+          if ($bad) { $bad | Format-Table LineNumber, Line -AutoSize; throw 'install.ps1 must stay pure ASCII' }
+      - name: Windows PowerShell 5.1 parses install.ps1
+        shell: powershell
+        run: |
+          $errs = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$PWD\install.ps1", [ref]$null, [ref]$errs)
+          if ($errs) { $errs | Format-List; throw 'install.ps1 does not parse in Windows PowerShell 5.1' }
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tests
+        shell: pwsh
+        run: ./test_shipd.ps1
+
+      # Real Win32 / CIM / perf-counter / git paths, end to end on the runner.
+      - name: Smoke - snapshot, report, mem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # point the GIT panel at this checkout, with one commit of ours from today
+          git -c user.email=ci@example.com -c user.name=ci commit -q --allow-empty -m 'shipd smoke commit'
+          $cfg = Get-Content -LiteralPath ./config.json -Raw | ConvertFrom-Json
+          $cfg.git_roots = @($env:GITHUB_WORKSPACE)
+          $cfg | Add-Member -NotePropertyName author_emails -NotePropertyValue @('ci@example.com') -Force
+          $cfg | ConvertTo-Json | Set-Content -LiteralPath ./config.json
+
+          ./shipd.ps1 snapshot
+          if ($LASTEXITCODE) { throw "snapshot exited $LASTEXITCODE" }
+
+          ./shipd.ps1 report
+          if ($LASTEXITCODE) { throw "report exited $LASTEXITCODE" }
+          # newest file, not today's date: a run that crosses midnight must not look for the wrong name
+          $file = Get-ChildItem -LiteralPath ./reports -Filter '*.txt' | Sort-Object LastWriteTime | Select-Object -Last 1
+          $text = Get-Content -LiteralPath $file.FullName -Raw
+          $text
+          if ($text -notmatch '(?m)^SYSTEM\r?$\s+CPU \d+%') { throw 'report has no SYSTEM stats' }
+          if ($text -notmatch 'shipd smoke commit') { throw 'report GIT section is missing the smoke commit' }
+          if ($text -notmatch 'snapshots: 1 ') { throw 'report ACTIVITY section did not read the snapshot just taken' }
+
+          $mem = ./shipd.ps1 mem
+          $mem
+          if ("$mem" -notmatch 'standby cache') { throw "mem output unexpected: $mem" }
