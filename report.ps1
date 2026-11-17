@@ -1,6 +1,32 @@
 # Report data + rendering. Terminal dashboard uses $PSStyle (pwsh 7 built-in, no deps);
 # the saved reports\<date>.txt stays plain text.
 
+$script:ShipdColors = @{
+    G = $PSStyle.Foreground.FromRgb(0, 200, 100)
+    B = $PSStyle.Foreground.FromRgb(185, 255, 205)
+    D = $PSStyle.Foreground.FromRgb(0, 110, 60)
+    Warn = $PSStyle.Foreground.Yellow
+    Crit = $PSStyle.Foreground.Red
+    Bold = $PSStyle.Bold
+    R = $PSStyle.Reset
+}
+$script:ShipdThresholds = @{ Cpu = 60; Ram = 70; Critical = 90 }
+
+function Get-ShipdPalette {
+    $palette = @{}
+    foreach ($key in $script:ShipdColors.Keys) {
+        $palette[$key] = if ($env:NO_COLOR) { '' } else { $script:ShipdColors[$key] }
+    }
+    $palette
+}
+
+function Get-UsageColor {
+    param([double]$Value, [ValidateSet('Cpu', 'Ram')][string]$Metric = 'Cpu', $Palette = (Get-ShipdPalette))
+    if ($Value -ge $script:ShipdThresholds.Critical) { $Palette.Crit }
+    elseif ($Value -ge $script:ShipdThresholds[$Metric]) { $Palette.Warn }
+    else { $Palette.G }
+}
+
 # Append one snapshot as a JSON line. A torn previous append leaves no trailing newline;
 # start on a fresh line so this record isn't glued onto the fragment and lost with it.
 function Add-SnapshotLine {
@@ -60,54 +86,58 @@ function Get-Bar {
 
 function Show-Dashboard {
     param($Data)
-    $s = $PSStyle
-    $cy = $s.Foreground.Cyan; $ye = $s.Foreground.Yellow; $gr = $s.Foreground.Green
-    $re = $s.Foreground.Red; $dim = $s.Foreground.BrightBlack; $b = $s.Bold; $r = $s.Reset
+    $palette = Get-ShipdPalette
+    $cy = $palette.B; $ye = $palette.Warn; $gr = $palette.G
+    $re = $palette.Crit; $dim = $palette.D; $b = $palette.Bold; $r = $palette.R
     $w = 64
+    $rendering = $PSStyle.OutputRendering
+    if ($env:NO_COLOR) { $PSStyle.OutputRendering = 'PlainText' }
+    try {
+        Write-Host ''
+        Write-Host "$cy╭$('─' * ($w - 2))╮$r"
+        Write-Host ("$cy│$r$b  {0,-$($w - 4)}$r$cy│$r" -f "SHIPD · daily report · $($Data.Day)")
+        Write-Host "$cy╰$('─' * ($w - 2))╯$r"
 
-    Write-Host ''
-    Write-Host "$cy╭$('─' * ($w - 2))╮$r"
-    Write-Host ("$cy│$r$b  {0,-$($w - 4)}$r$cy│$r" -f "SHIPD · daily report · $($Data.Day)")
-    Write-Host "$cy╰$('─' * ($w - 2))╯$r"
+        if ($Data.Stats) {
+            $st = $Data.Stats
+            $ramPct = $st.ram_used / $st.ram_total * 100
+            $cpuCol = Get-UsageColor $st.cpu Cpu $palette
+            $ramCol = Get-UsageColor $ramPct Ram $palette
+            Write-Host "$ye SYSTEM$r"
+            Write-Host ("   CPU  $cpuCol$(Get-Bar $st.cpu)$r {0,3}%          GPU  {1}" -f $st.cpu, $st.gpu)
+            Write-Host ("   RAM  $ramCol$(Get-Bar $ramPct)$r $($st.ram_used)/$($st.ram_total) GB")
+            Write-Host "   $dim$($st.disks -join '    ')$r"
+            Write-Host ''
+        }
 
-    if ($Data.Stats) {
-        $st = $Data.Stats
-        $ramPct = $st.ram_used / $st.ram_total * 100
-        $cpuCol = if ($st.cpu -ge 90) { $re } elseif ($st.cpu -ge 60) { $ye } else { $gr }
-        $ramCol = if ($ramPct -ge 90) { $re } elseif ($ramPct -ge 70) { $ye } else { $gr }
-        Write-Host "$ye SYSTEM$r"
-        Write-Host ("   CPU  $cpuCol$(Get-Bar $st.cpu)$r {0,3}%          GPU  {1}" -f $st.cpu, $st.gpu)
-        Write-Host ("   RAM  $ramCol$(Get-Bar $ramPct)$r $($st.ram_used)/$($st.ram_total) GB")
-        Write-Host "   $dim$($st.disks -join '    ')$r"
+        Write-Host "$ye GIT$r"
+        if (-not $Data.Repos.Count) { Write-Host "$dim   no commits$r" }
+        foreach ($repo in $Data.Repos) {
+            $sign = if ($repo.NetLines -ge 0) { '+' } else { '' }
+            Write-Host "   $b$($repo.Name)$r $dim· $($repo.Commits.Count) commit(s) · $sign$($repo.NetLines) lines$r"
+            foreach ($c in $repo.Commits) {
+                $msg = if ($c.Message.Length -gt 42) { $c.Message.Substring(0, 41) + '…' } else { $c.Message }
+                $s2 = if ($c.NetLines -ge 0) { '+' } else { '' }
+                Write-Host ("     $gr$($c.Hash)$r {0,-43} $dim{1,3}f {2,6}$r" -f $msg, $c.Files, "$s2$($c.NetLines)")
+            }
+        }
+        Write-Host ''
+
+        Write-Host "$ye ACTIVITY$r"
+        $a = $Data.Act
+        if (-not $a) { Write-Host "$dim   no snapshots$r" }
+        else {
+            Write-Host "   $($a.Count) snapshots · $gr$($a.Count - $a.Idle) active$r · $dim$($a.Idle) idle$r"
+            $max = ($a.Focus | Measure-Object Count -Maximum).Maximum
+            foreach ($g in $a.Focus | Select-Object -First 8) {
+                $name = if ($g.Name) { $g.Name } else { '(unknown)' }
+                Write-Host ("   {0,-22} $cy$(Get-Bar ($g.Count / $max * 100) 16)$r {1}" -f $name, $g.Count)
+            }
+            if ($a.Games.Count) { Write-Host "   ${re}games seen: $($a.Games -join ', ')$r" }
+        }
         Write-Host ''
     }
-
-    Write-Host "$ye GIT$r"
-    if (-not $Data.Repos.Count) { Write-Host "$dim   no commits$r" }
-    foreach ($repo in $Data.Repos) {
-        $sign = if ($repo.NetLines -ge 0) { '+' } else { '' }
-        Write-Host "   $b$($repo.Name)$r $dim· $($repo.Commits.Count) commit(s) · $sign$($repo.NetLines) lines$r"
-        foreach ($c in $repo.Commits) {
-            $msg = if ($c.Message.Length -gt 42) { $c.Message.Substring(0, 41) + '…' } else { $c.Message }
-            $s2 = if ($c.NetLines -ge 0) { '+' } else { '' }
-            Write-Host ("     $gr$($c.Hash)$r {0,-43} $dim{1,3}f {2,6}$r" -f $msg, $c.Files, "$s2$($c.NetLines)")
-        }
-    }
-    Write-Host ''
-
-    Write-Host "$ye ACTIVITY$r"
-    $a = $Data.Act
-    if (-not $a) { Write-Host "$dim   no snapshots$r" }
-    else {
-        Write-Host "   $($a.Count) snapshots · $gr$($a.Count - $a.Idle) active$r · $dim$($a.Idle) idle$r"
-        $max = ($a.Focus | Measure-Object Count -Maximum).Maximum
-        foreach ($g in $a.Focus | Select-Object -First 8) {
-            $name = if ($g.Name) { $g.Name } else { '(unknown)' }
-            Write-Host ("   {0,-22} $cy$(Get-Bar ($g.Count / $max * 100) 16)$r {1}" -f $name, $g.Count)
-        }
-        if ($a.Games.Count) { Write-Host "   ${re}games seen: $($a.Games -join ', ')$r" }
-    }
-    Write-Host ''
+    finally { $PSStyle.OutputRendering = $rendering }
 }
 
 function Format-ReportText {

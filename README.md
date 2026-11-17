@@ -9,6 +9,8 @@ Every 10 minutes it takes a silent snapshot of what you're doing (focused app, i
 
 ![shipd live dashboard](docs/dashboard.png)
 
+Set `NO_COLOR` to a non-empty value to disable colors in the live dashboard and terminal report.
+
 ## Requirements
 
 - Windows 10/11
