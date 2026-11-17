@@ -33,14 +33,97 @@ if ($found.Count -ne 1 -or $found[0] -notlike '*repo1') {
 . (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'dashboard.ps1'))
 $stats = [pscustomobject]@{ cpu = 42; gpu = '10% 60C'; ram_used = 8.5; ram_total = 16; disks = @('C: 1/2 GB', 'X: 3/4 GB') }
 $snap = [pscustomobject]@{ Focused = 'Code'; IdleSec = 1.5; Summary = $null }
-foreach ($dim in @(@(120, 30), @(110, 24), @(160, 45))) {
+$palette = Get-ShipdPalette
+$sample = @{ At = 12; Processes = @(
+    [pscustomobject]@{ Id = 1; Name = 'unreadable'; CpuSeconds = $null; MemoryMB = 1 }
+    [pscustomobject]@{ Id = 2; Name = 'idle'; CpuSeconds = 0; MemoryMB = 2 }
+    [pscustomobject]@{ Id = 3; Name = 'busy'; CpuSeconds = 4; MemoryMB = 3 }
+    [pscustomobject]@{ Id = 4; Name = ('longprocessname' * 8); CpuSeconds = 2; MemoryMB = 4 }
+) }
+$previous = @{ At = 10; Processes = @(
+    [pscustomobject]@{ Id = 1; CpuSeconds = 1 }
+    [pscustomobject]@{ Id = 2; CpuSeconds = 0 }
+    [pscustomobject]@{ Id = 3; CpuSeconds = 0 }
+) }
+foreach ($dim in @(@(110, 24), @(120, 30), @(140, 30), @(160, 45), @(180, 45), @(240, 45))) {
     $W = $dim[0]; $H = $dim[1]
     $mem = [pscustomobject]@{ total = 16; in_use = 9.25; standby = 4.5; modified = 0.25; free = 2 }
-    $frame = @(Build-DashFrame -GitLines @('plain', "$($TH.B)colored line") -Snap $snap -Stats $stats -CpuHist @(0, 30, 100) -W $W -H $H -Mem $mem -MemMsg 'freed 2.5 GB')
+    $frameArgs = @{ GitLines = @('plain', "$($palette.B)colored line"); Snap = $snap; Stats = $stats
+        CpuHist = @(0, 30, 100); W = $W; H = $H; Mem = $mem; MemMsg = 'freed 2.5 GB'; ProcessSample = $sample }
+    $frame = @(Build-DashFrame @frameArgs -PreviousSample $previous)
     if ($frame.Count -ne $H - 1) { throw "frame ${W}x${H}: expected $($H - 1) lines, got $($frame.Count)" }
-    $bad = $frame[0..($H - 3)] | Where-Object { (Get-VisLen $_) -ne $W }
+    $bad = $frame | Where-Object { (Get-VisLen $_) -ne $W }
     if ($bad) { throw "frame ${W}x${H}: ragged lines (visible width != $W):`n$($bad -join "`n")" }
+    if ($frame[1] -notmatch 'CPU%' -or $frame[1] -match 'CPU\(s\)') { throw 'process CPU header incorrect' }
+    if ($frame[2] -notmatch 'busy' -or $frame[3] -notmatch 'idle' -or $frame[4] -notmatch 'unreadable') {
+        throw 'processes must sort by live CPU, zero before unavailable'
+    }
+    $expected = '{0:N1}' -f (Get-ProcessCpuPercent 4 0 2)
+    if ($frame[2] -notmatch [regex]::Escape($expected)) { throw 'process CPU not formatted to one decimal' }
+    $first = @(Build-DashFrame @frameArgs)
+    if (($first[4] -replace "`e\[[0-9;]*m", '') -notmatch 'busy\s+-\s+3') { throw 'first sample must show - for readable CPU times too' }
 }
+
+# --- CPU deltas: total machine capacity, missing readings, elapsed time, counters going backwards ---
+foreach ($case in @(
+    @{ Current = 4; Prior = 2; Wall = 2; Cores = 4; Want = 25 }
+    @{ Current = 2.01; Prior = 2; Wall = 2; Cores = 2; Want = 0.25 }
+    @{ Current = 2; Prior = 2; Wall = 2; Cores = 4; Want = 0 }
+    @{ Current = 20; Prior = 0; Wall = 2; Cores = 4; Want = 100 }
+    @{ Current = 4; Prior = $null; Wall = 2; Cores = 4; Want = $null }
+    @{ Current = $null; Prior = 2; Wall = 2; Cores = 4; Want = $null }
+    @{ Current = 4; Prior = 2; Wall = 0; Cores = 4; Want = $null }
+    @{ Current = 4; Prior = 2; Wall = -1; Cores = 4; Want = $null }
+    @{ Current = 4; Prior = 2; Wall = 2; Cores = 0; Want = $null }
+    @{ Current = 1; Prior = 2; Wall = 2; Cores = 4; Want = $null }
+)) {
+    $actual = Get-ProcessCpuPercent $case.Current $case.Prior $case.Wall $case.Cores
+    if ($null -eq $case.Want) {
+        if ($null -ne $actual) { throw "CPU delta should be unavailable: $actual" }
+    }
+    elseif ([math]::Abs($actual - $case.Want) -gt 0.000001) { throw "CPU delta: expected $($case.Want), got $actual" }
+}
+$denied = [pscustomobject]@{ Id = 99; ProcessName = 'denied'; WorkingSet64 = 1MB }
+$denied | Add-Member -MemberType ScriptProperty -Name TotalProcessorTime -Value { throw 'access denied' }
+$readable = [pscustomobject]@{ Id = 98; ProcessName = 'readable'; WorkingSet64 = 2MB; TotalProcessorTime = [timespan]::FromSeconds(4) }
+$captured = Get-ProcessCpuSample -Processes @($denied, $readable)
+if ($null -ne $captured.Processes[0].CpuSeconds -or $captured.Processes[1].CpuSeconds -ne 4) {
+    throw 'process sampling must tolerate access denied and preserve readable CPU times'
+}
+
+# --- shared thresholds, NO_COLOR, and OutputRendering restoration ---
+$savedColor = $env:NO_COLOR; $savedRendering = $PSStyle.OutputRendering
+try {
+    $env:NO_COLOR = ''
+    $colors = Get-ShipdPalette
+    foreach ($case in @(@(59, 'Cpu', 'G'), @(60, 'Cpu', 'Warn'), @(89, 'Cpu', 'Warn'),
+            @(90, 'Cpu', 'Crit'), @(69, 'Ram', 'G'), @(70, 'Ram', 'Warn'), @(90, 'Ram', 'Crit'))) {
+        if ((Get-UsageColor $case[0] $case[1]) -ne $colors[$case[2]]) { throw 'shared color thresholds incorrect' }
+    }
+    if (-not $colors.G) { throw 'empty NO_COLOR must allow colors' }
+    $data = [pscustomobject]@{ Day = '2026-07-01'; Stats = $stats; Repos = @(); Act = $null }
+    if ((Format-ReportText $data) -match "`e\[") { throw 'saved report contains ANSI with colors enabled' }
+    foreach ($value in '1', '0') {
+        $env:NO_COLOR = $value
+        if (@((Get-ShipdPalette).Values | Where-Object { $_ -ne '' }).Count) { throw 'NO_COLOR palette not empty' }
+        foreach ($width in 110..240) {
+            $frameArgs.W = $width
+            $plain = @(Build-DashFrame @frameArgs -PreviousSample $previous)
+            if ($plain -match "`e\[") { throw 'NO_COLOR frame contains ANSI' }
+            if (@($plain | Where-Object Length -ne $width).Count) { throw "NO_COLOR frame width != $width" }
+        }
+        $PSStyle.OutputRendering = 'ANSI'
+        $report = Show-Dashboard $data 6>&1 | Out-String
+        if ($report -match "`e\[" -or $PSStyle.OutputRendering -ne 'ANSI') { throw 'NO_COLOR report or rendering restoration failed' }
+        if ((Format-ReportText $data) -match "`e\[") { throw 'saved report contains ANSI' }
+    }
+    # A rendering failure must restore the caller's setting too.
+    $renderFailed = $false
+    try { Show-Dashboard ([pscustomobject]@{ Stats = @{ ram_used = 1; ram_total = 0 } }) 6>$null }
+    catch { $renderFailed = $true }
+    if (-not $renderFailed -or $PSStyle.OutputRendering -ne 'ANSI') { throw 'report failure restoration check failed' }
+}
+finally { $env:NO_COLOR = $savedColor; $PSStyle.OutputRendering = $savedRendering }
 
 # --- snapshot log: torn line skipped, next append starts a fresh line, other days filtered out ---
 $log = Join-Path ([IO.Path]::GetTempPath()) "shipd_snaps_$(Get-Random).jsonl"

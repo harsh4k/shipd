@@ -29,7 +29,7 @@ shipd.ps1       Entry point and command switch (dashboard, snapshot, report, mem
 git_scan.ps1    Find-Repos, ConvertFrom-NumstatLog, Get-DayCommits, Get-DayRepoCommits
 activity.ps1    Focused process, idle seconds, system stats, Get-ActivitySnapshot
 memory.ps1      Memory breakdown (perf counters) + Clear-StandbyList (admin only, manual only)
-report.ps1      Get-DaySnapSummary, Get-ReportData, Show-Dashboard (colored), Format-ReportText (plain)
+report.ps1      Shared palette + thresholds, Get-DaySnapSummary, Get-ReportData, Show-Dashboard, Format-ReportText (plain)
 dashboard.ps1   Live TUI: panels, big clock, sparkline, key loop (q / g / f)
 install.ps1     One-line installer: pwsh check, download, CMD wrapper, profiles, PATH, schedule
 hidden.vbs      Windowless launcher for scheduled tasks. Do not delete
@@ -97,5 +97,5 @@ must be opt-in and documented in the README's Privacy section.
    `install.ps1` end to end under 5.1 in CI comes with step 4 (it needs a local-source option).
 4. Install lifecycle: `shipd uninstall`, versioned installs from release tags, fix the CMD
    refresh helper.
-5. Dashboard polish: responsive panel widths, live CPU % instead of cumulative CPU seconds, a
-   palette shared with the report, `NO_COLOR` support.
+5. ~~Dashboard polish~~ done: responsive panel widths, live CPU % instead of cumulative CPU seconds,
+   a palette shared with the report, `NO_COLOR` support.

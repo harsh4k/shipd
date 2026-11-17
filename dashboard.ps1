@@ -2,13 +2,6 @@
 # Reuses Get-SystemStats/Get-FocusedProcessName/Get-IdleSeconds (activity.ps1),
 # Find-Repos/Get-DayCommits (git_scan.ps1), Get-Bar (report.ps1).
 
-$script:TH = @{
-    G = $PSStyle.Foreground.FromRgb(0, 200, 100)    # text
-    B = $PSStyle.Foreground.FromRgb(185, 255, 205)  # bright accent
-    D = $PSStyle.Foreground.FromRgb(0, 110, 60)     # dim / borders
-    R = $PSStyle.Reset
-}
-
 $script:DigitFont = @{
     '0' = '███', '█ █', '█ █', '█ █', '███'
     '1' = ' █ ', '██ ', ' █ ', ' █ ', '███'
@@ -60,6 +53,7 @@ function New-Panel {
 
 function Get-GitPanelLines {
     param($Config)
+    $TH = Get-ShipdPalette
     $lines = @()
     foreach ($repo in Get-DayRepoCommits -Config $Config) {
         $sign = if ($repo.NetLines -ge 0) { '+' } else { '' }
@@ -73,10 +67,37 @@ function Get-GitPanelLines {
     $lines
 }
 
+function Get-ProcessCpuPercent {
+    param([Nullable[double]]$CpuSeconds, [Nullable[double]]$PreviousCpuSeconds,
+        [double]$ElapsedSeconds, [int]$ProcessorCount = [Environment]::ProcessorCount)
+    if ($null -eq $CpuSeconds -or $null -eq $PreviousCpuSeconds -or
+        $ElapsedSeconds -le 0 -or $ProcessorCount -le 0 -or $CpuSeconds -lt $PreviousCpuSeconds) { return $null }
+    [math]::Min(100.0, ($CpuSeconds - $PreviousCpuSeconds) / ($ElapsedSeconds * $ProcessorCount) * 100)
+}
+
+function Get-ProcessCpuSample {
+    param($Processes = (Get-Process))
+    $at = [Diagnostics.Stopwatch]::GetTimestamp() / [double][Diagnostics.Stopwatch]::Frequency
+    $rows = @(foreach ($process in $Processes) {
+        $cpu = $null; $memory = $null
+        try { $cpu = $process.TotalProcessorTime.TotalSeconds }
+        catch { Write-Verbose "CPU time unavailable for PID $($process.Id): $_" }
+        try { $memory = $process.WorkingSet64 / 1MB }
+        catch { Write-Verbose "Memory unavailable for PID $($process.Id): $_" }
+        [pscustomobject]@{ Id = $process.Id; Name = $process.ProcessName; CpuSeconds = $cpu; MemoryMB = $memory }
+    })
+    @{ At = $at; Processes = $rows }
+}
+
 function Build-DashFrame {
-    param([string[]]$GitLines, $Snap, $Stats, [double[]]$CpuHist, [int]$W, [int]$H, $Mem, [string]$MemMsg = '')
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'preserves the existing frame builder name and callers')]
+    param([string[]]$GitLines, $Snap, $Stats, [double[]]$CpuHist, [int]$W, [int]$H, $Mem, [string]$MemMsg = '',
+        $ProcessSample = (Get-ProcessCpuSample), $PreviousSample)
+    $TH = Get-ShipdPalette
     $ph = $H - 2
-    $lw = 34; $rw = 32; $mw = $W - $lw - $rw
+    $lw = [int][math]::Clamp([math]::Floor($W * 0.3), 34, 64)
+    $rw = [int][math]::Clamp([math]::Floor($W * 0.3), 32, 64)
+    $mw = $W - $lw - $rw
 
     # ── left: clock + system ──
     $liw = $lw - 2
@@ -88,9 +109,9 @@ function Build-DashFrame {
     $left += "$($TH.D)$(' ' * [math]::Max(0, [math]::Floor(($liw - $d.Length) / 2)))$d"
     $left += ''
     $ramPct = $Stats.ram_used / $Stats.ram_total * 100
-    $left += "CPU $(Get-Bar $Stats.cpu 14) $($TH.B)$($Stats.cpu)%"
+    $left += "CPU $(Get-UsageColor $Stats.cpu Cpu $TH)$(Get-Bar $Stats.cpu 14) $($Stats.cpu)%$($TH.G)"
     $left += "$($TH.D)    $(Get-Sparkline $CpuHist ($liw - 5))"
-    $left += "RAM $(Get-Bar $ramPct 14) $($TH.B)$($Stats.ram_used)/$($Stats.ram_total)"
+    $left += "RAM $(Get-UsageColor $ramPct Ram $TH)$(Get-Bar $ramPct 14) $($Stats.ram_used)/$($Stats.ram_total)$($TH.G)"
     $left += "GPU $($TH.B)$($Stats.gpu)"
     $up = [TimeSpan]::FromMilliseconds([Environment]::TickCount64)
     $left += "UP  $($TH.B)$($up.Days)d $($up.Hours)h $($up.Minutes)m"
@@ -107,12 +128,22 @@ function Build-DashFrame {
     # ── middle: processes ──
     $miw = $mw - 2
     $nameW = $miw - 30
-    $fmt = "{0,7} {1,-$nameW} {2,10:N1} {3,10:N0}"
-    $mid = @("$($TH.D)" + ("{0,7} {1,-$nameW} {2,10} {3,10}" -f 'PID', 'NAME', 'CPU(s)', 'MEM(MB)'))
-    Get-Process | Sort-Object CPU -Descending | Select-Object -First ($ph - 3) | ForEach-Object {
-        $n = $_.ProcessName
+    $fmt = "{0,7} {1,-$nameW} {2,10} {3,10}"
+    $mid = @("$($TH.D)" + ($fmt -f 'PID', 'NAME', 'CPU%', 'MEM(MB)'))
+    $previous = @{}
+    if ($PreviousSample) { foreach ($row in $PreviousSample.Processes) { $previous[$row.Id] = $row.CpuSeconds } }
+    $elapsed = if ($PreviousSample) { $ProcessSample.At - $PreviousSample.At } else { 0 }
+    $rows = foreach ($row in $ProcessSample.Processes) {
+        $pct = Get-ProcessCpuPercent $row.CpuSeconds $previous[$row.Id] $elapsed
+        [pscustomobject]@{ Id = $row.Id; Name = $row.Name; Cpu = $pct; MemoryMB = $row.MemoryMB }
+    }
+    $rows | Sort-Object -Stable @{ Expression = { $null -ne $_.Cpu }; Descending = $true },
+        @{ Expression = { $_.Cpu }; Descending = $true } | Select-Object -First ($ph - 3) | ForEach-Object {
+        $n = $_.Name
         if ($n.Length -gt $nameW) { $n = $n.Substring(0, $nameW - 1) + '…' }
-        $mid += ($fmt -f $_.Id, $n, $_.CPU, ($_.WorkingSet64 / 1MB))
+        $cpuText = if ($null -eq $_.Cpu) { '-' } else { '{0:N1}' -f $_.Cpu }
+        $memText = if ($null -eq $_.MemoryMB) { '-' } else { '{0:N0}' -f $_.MemoryMB }
+        $mid += ($fmt -f $_.Id, $n, $cpuText, $memText)
     }
 
     # ── right: activity + git ──
@@ -140,7 +171,8 @@ function Build-DashFrame {
     $leftP = New-Panel 'SHIPD' $left $lw $ph
     $midP = New-Panel 'PROCESSES' $mid $mw $ph
     $frame = for ($i = 0; $i -lt $ph; $i++) { $leftP[$i] + $midP[$i] + $right[$i] }
-    $frame + "$($TH.D)  q quit · g rescan git · f free ram$($TH.R)"
+    $frame += "$($TH.D)$('  q quit · g rescan git · f free ram'.PadRight($W))$($TH.R)"
+    if ($env:NO_COLOR) { $frame -replace "`e\[[0-9;]*m", '' } else { $frame }
 }
 
 function Show-LiveDashboard {
@@ -150,14 +182,18 @@ function Show-LiveDashboard {
         Write-Host "shipd dashboard needs a window of at least 110x24 (yours is ${W}x${H}) — maximize the terminal and retry"
         return
     }
-    $gitLines = Get-GitPanelLines $Config
-    $summary = Get-DaySnapSummary $Config $LogPath
-    $cpuHist = @()
-    $tick = 0
-    $memMsg = ''; $memMsgTicks = 0
-    [Console]::CursorVisible = $false
-    Clear-Host
+    $TH = Get-ShipdPalette
+    $rendering = $PSStyle.OutputRendering
+    if ($env:NO_COLOR) { $PSStyle.OutputRendering = 'PlainText' }
     try {
+        $gitLines = Get-GitPanelLines $Config
+        $summary = Get-DaySnapSummary $Config $LogPath
+        $cpuHist = @()
+        $previousSample = $null
+        $tick = 0
+        $memMsg = ''; $memMsgTicks = 0
+        [Console]::CursorVisible = $false
+        Clear-Host
         while ($true) {
             $nW = $Host.UI.RawUI.WindowSize.Width; $nH = $Host.UI.RawUI.WindowSize.Height
             if ($nW -ne $W -or $nH -ne $H) {
@@ -170,7 +206,11 @@ function Show-LiveDashboard {
             $cpuHist = @($cpuHist + [double]$stats.cpu | Select-Object -Last 60)
             if ($tick -gt 0 -and $tick % 15 -eq 0) { $summary = Get-DaySnapSummary $Config $LogPath }
             $snap = [pscustomobject]@{ Focused = Get-FocusedProcessName; IdleSec = Get-IdleSeconds; Summary = $summary }
-            $frame = Build-DashFrame -GitLines $gitLines -Snap $snap -Stats $stats -CpuHist $cpuHist -W $W -H $H -Mem $mem -MemMsg $memMsg
+            $sample = Get-ProcessCpuSample
+            $frameArgs = @{ GitLines = $gitLines; Snap = $snap; Stats = $stats; CpuHist = $cpuHist
+                W = $W; H = $H; Mem = $mem; MemMsg = $memMsg; ProcessSample = $sample; PreviousSample = $previousSample }
+            $frame = Build-DashFrame @frameArgs
+            $previousSample = $sample
             [Console]::SetCursorPosition(0, 0)
             Write-Host ($frame -join "`n") -NoNewline
             $tick++
@@ -193,8 +233,9 @@ function Show-LiveDashboard {
         }
     }
     finally {
+        $PSStyle.OutputRendering = $rendering
         [Console]::CursorVisible = $true
-        Write-Host $PSStyle.Reset -NoNewline
+        Write-Host $TH.R -NoNewline
         Clear-Host
     }
 }
